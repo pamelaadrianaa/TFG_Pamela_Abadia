@@ -1,0 +1,757 @@
+#!/usr/bin/env Rscript
+
+#######################################
+###### INTELIGENCIA ARTIFICIAL ########
+#######################################
+
+###Gallus gallus###
+
+
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(stringr)
+
+# Cargar los datos
+datos_in_vitro <- read_csv("go_sums_gallus_gallus.csv", show_col_types = FALSE)
+
+# LIMPIEZA 
+# Eliminamos la primera fila vacía 
+datos_limpios <- datos_in_vitro %>% filter(!is.na(id))
+
+# Creamos el Diccionario GO oficial para Gallus gallus
+diccionario_gallus <- datos_limpios %>% dplyr::select(ID_GO = id, Nombre = nam, Definicion = def)
+
+# Extraemos los conteos y ELIMINAMOS las columnas TLR3_KO
+conteos_invitro <- datos_limpios %>%
+  dplyr::select(id, 
+                starts_with("DF.1_"), 
+                starts_with("DF.1P_"), 
+                starts_with("DF.1PC_")) %>%
+  # Aseguramos que no se nos cuela nada de TLR3
+  dplyr::select(-contains("TLR3"))
+
+# Asignamos el ID de la ruta como nombre de fila y quitamos la columna 'id'
+conteos_invitro <- as.data.frame(conteos_invitro)
+rownames(conteos_invitro) <- conteos_invitro$id
+conteos_invitro$id <- NULL
+
+# MATRIZ DE DISEÑO 
+# Extraemos los nombres de las columnas para asignar a qué grupo pertenece cada una
+nombres_muestras <- colnames(conteos_invitro)
+
+# Lógica para extraer la Línea (DF.1, DF.1P, DF.1PC) y el Estado (uninfected, IBDV)
+metadatos <- data.frame(
+  Muestra = nombres_muestras,
+  Linea = case_when(
+    str_detect(nombres_muestras, "DF\\.1_") ~ "DF.1 (WT)",
+    str_detect(nombres_muestras, "DF\\.1P_") ~ "DF.1P (Persistente)",
+    str_detect(nombres_muestras, "DF\\.1PC_") ~ "DF.1PC (Curada)"
+  ),
+  Estado = case_when(
+    str_detect(nombres_muestras, "uninfected") ~ "Control",
+    str_detect(nombres_muestras, "IBDV") ~ "Infectado"
+  )
+)
+
+# Creamos un grupo combinado para colorear el gráfico fácilmente
+metadatos$Grupo_Combinado <- paste(metadatos$Linea, metadatos$Estado, sep = " - ")
+
+# ==============================================================================
+#   PCA 
+# ==============================================================================
+# Transponemos y aplicamos log2(x + 1) para normalizar la varianza
+datos_pca <- log2(t(conteos_invitro) + 1)
+pca_res <- prcomp(datos_pca, center = TRUE, scale. = TRUE)
+
+# Calculamos el porcentaje de varianza explicada por cada eje
+varianza <- summary(pca_res)$importance[2, ] * 100
+
+# dataframe 
+df_pca <- as.data.frame(pca_res$x)
+df_pca <- cbind(df_pca, metadatos)
+
+#grafico
+grafico_pca_invitro <- ggplot(df_pca, aes(x = PC1, y = PC2, color = Linea, shape = Estado)) +
+  geom_point(size = 4, alpha = 0.8) +
+  # Usamos una paleta de colores profesional
+  scale_color_manual(values = c("DF.1 (WT)" = "#1b9e77", 
+                                "DF.1P (Persistente)" = "#d95f02", 
+                                "DF.1PC (Curada)" = "#7570b3")) +
+  labs(
+    x = paste0("Componente Principal 1 (", round(varianza[1], 1), "%)"),
+    y = paste0("Componente Principal 2 (", round(varianza[2], 1), "%)"),
+    color = "Línea Celular",
+    shape = "Condición Viral"
+  ) +
+  theme_classic(base_family = "sans", base_size = 12) +
+  theme(
+    legend.position = "right",
+    legend.title = element_text(face = "bold"),
+    axis.text = element_text(color = "black", size = 11),
+    axis.title = element_text(face = "bold", size = 12),
+    panel.border = element_rect(colour = "black", fill = NA, linewidth = 1)
+  )
+
+print(grafico_pca_invitro)
+ggsave("PCA_Invitro_Gallus.png", plot = grafico_pca_invitro, width = 10, height = 7, dpi = 300)
+
+
+# ==============================================================================
+# HEATMAP 
+# ==============================================================================
+library(pheatmap)
+library(RColorBrewer)
+library(stringr)
+
+# Asociar los nombres biológicos reales a la matriz completa antes de filtrar
+nombres_invitro <- sapply(rownames(conteos_invitro), function(id) {
+  nombre_real <- diccionario_gallus$Nombre[diccionario_gallus$ID_GO == id][1]
+  if(is.na(nombre_real)) return(id)
+  return(nombre_real)
+})
+
+# FILTRO SEMÁNTICO: Lista de términos estructurales/genéricos
+terminos_basura <- c("cytosol", "nucleus", "cytoplasm", "nucleoplasm", "membrane", 
+                     "extracellular", "organelle", "intracellular", "Golgi apparatus", 
+                     "mitochondrion", "endoplasmic reticulum", "vesicle", "cytoskeleton",
+                     "cell part", "protein binding", "ATP binding", "extracellular region")
+                  
+patron_filtro <- paste(terminos_basura, collapse = "|")
+
+indices_especificos <- !grepl(patron_filtro, nombres_invitro, ignore.case = TRUE)
+
+conteos_filtrados <- conteos_invitro[indices_especificos, ]
+nombres_filtrados <- nombres_invitro[indices_especificos]
+
+# Calcular la varianza y extraer el Top 50 biológicamente relevante
+varianzas_go <- apply(conteos_filtrados, 1, var)
+indices_top50 <- order(varianzas_go, decreasing = TRUE)[1:50]
+
+matriz_top50 <- conteos_filtrados[indices_top50, ]
+nombres_finales <- nombres_filtrados[indices_top50]
+
+# Truncar nombres largos 
+nombres_cortos <- str_trunc(nombres_finales, width = 55, side = "right")
+rownames(matriz_top50) <- make.unique(as.character(nombres_cortos))
+
+#ordenar
+orden_deseado <- c(
+  "DF.1_uninfected_S1_R1_001", "DF.1_uninfected_S2_R1_001", "DF.1_uninfected_S3_R1_001",
+  "DF.1_IBDV_S1_R1_001", "DF.1_IBDV_S2_R1_001", "DF.1_IBDV_S3_R1_001",
+  "DF.1P_uninfected_S1_R1_001", "DF.1P_uninfected_S2_R1_001", "DF.1P_uninfected_S3_R1_001",
+  "DF.1P_IBDV_S1_R1_001", "DF.1P_IBDV_S2_R1_001", "DF.1P_IBDV_S3_R1_001",
+  "DF.1PC_uninfected_S1_R1_001", "DF.1PC_uninfected_S2_R1_001", "DF.1PC_uninfected_S3_R1_001",
+  "DF.1PC_IBDV_S1_R1_001", "DF.1PC_IBDV_S2_R1_001", "DF.1PC_IBDV_S3_R1_001"
+)
+
+# Aplicar la transformación logarítmica y ordenar
+matriz_log_invitro_ord <- log2(matriz_top50[, orden_deseado] + 1)
+anotaciones_col_ord <- anotaciones_columnas[orden_deseado, , drop = FALSE]
+
+# Limpieza visual de los nombres 
+colnames(matriz_log_invitro_ord) <- str_replace(colnames(matriz_log_invitro_ord), "_R1_001", "")
+
+# Heatmap 
+paleta_divergente <- colorRampPalette(rev(brewer.pal(n = 7, name = "RdBu")))(100)
+
+pheatmap(
+  mat = as.matrix(matriz_log_invitro_ord),
+  scale = "row",                    
+  color = paleta_divergente,
+  annotation_col = anotaciones_col_ord,
+  annotation_colors = colores_etiquetas,
+  cluster_rows = TRUE,              
+  cluster_cols = FALSE, # Mantenemos apagado para conservar tu orden de bloques
+  show_rownames = TRUE,             
+  show_colnames = TRUE,             
+  fontsize_row = 8,                 
+  fontsize_col = 9,
+  angle_col = 45,
+  cellwidth = 25,                   
+  cellheight = 12,                  
+  border_color = "grey90",          
+  main = "Perfil Transcriptómico Top 50 Filtrado (Modelo In Vitro)",
+  filename = "Heatmap_Invitro_Top50_Filtrado_Perfecto.png"
+)
+
+
+# ==============================================================================
+# MODELO DE INTELIGENCIA ARTIFICIAL: RANDOM FOREST
+# ==============================================================================
+library(randomForest)
+library(mixOmics)
+library(ggplot2)
+library(dplyr)
+library(stringr)
+
+#Preparacion de los datos
+# X: matriz transcriptómica filtrada (transpuesta para que las muestras sean filas)
+X_ml <- as.matrix(t(conteos_filtrados[, orden_deseado]))
+
+# Y: Las etiquetas reales de los 6 grupos experimentales (18 muestras)
+Y_ml <- factor(
+  c(rep("DF.1_WT_Sana", 3), rep("DF.1_WT_Infectada", 3),
+    rep("DF.1P_Sana", 3), rep("DF.1P_Infectada", 3),
+    rep("DF.1PC_Curada_Sana", 3), rep("DF.1PC_Curada_Infectada", 3)),
+  levels = c("DF.1_WT_Sana", "DF.1_WT_Infectada",
+             "DF.1P_Sana", "DF.1P_Infectada",
+             "DF.1PC_Curada_Sana", "DF.1PC_Curada_Infectada")
+)
+
+cat("\nEntrenando Random Forest (500 árboles)...\n")
+set.seed(42) # Semilla de reproducibilidad
+modelo_rf <- randomForest(x = X_ml, y = Y_ml, importance = TRUE, ntree = 500)
+
+# Extraer importancia (MeanDecreaseAccuracy)
+importancia_rf <- as.data.frame(importance(modelo_rf))
+importancia_rf$ID_GO <- rownames(importancia_rf)
+
+# Identificar el Top 20 de biomarcadores
+top20_rf <- merge(importancia_rf, diccionario_gallus, by = "ID_GO") %>%
+  arrange(desc(MeanDecreaseAccuracy)) %>%
+  head(20) %>%
+  mutate(Nombre_Corto = str_trunc(Nombre, width = 50, side = "right")) %>%
+  arrange(MeanDecreaseAccuracy) %>%
+  mutate(Nombre_Corto = factor(Nombre_Corto, levels = Nombre_Corto))
+
+# Gráfico RF
+grafico_rf_estetico <- ggplot(top20_rf, aes(x = MeanDecreaseAccuracy, y = Nombre_Corto)) +
+  # Usamos el azul oscuro oficial del proyecto con borde negro
+  geom_bar(stat = "identity", fill = "#045a8d", color = "black", linewidth = 0.5, width = 0.8) +
+  labs(
+    x = "Importancia Predictiva (Mean Decrease Accuracy)",
+    y = "Proceso Funcional (GO)"
+  ) +
+  theme_classic(base_family = "sans", base_size = 12) +
+  theme(
+    axis.text.y = element_text(color = "black", size = 10, face = "bold"),
+    axis.text.x = element_text(color = "black", size = 11),
+    axis.title = element_text(face = "bold", size = 12),
+    panel.border = element_rect(colour = "black", fill = NA, linewidth = 1)
+  )
+
+print(grafico_rf_estetico)
+ggsave("ML_RandomForest_Invitro_Estetico.png", plot = grafico_rf_estetico, width = 10, height = 7, dpi = 300)
+
+
+##########################################################
+#### RANDOM FOREST: DF.1_uninfected vs DF.1P_IBDV#########
+##########################################################
+library(randomForest)
+library(dplyr)
+
+# 1. Aislamos SOLO las 6 muestras críticas (WT Sana vs Persistente Basal)
+muestras_basal <- c("DF.1_uninfected_S1_R1_001", "DF.1_uninfected_S2_R1_001", "DF.1_uninfected_S3_R1_001",
+                    "DF.1P_uninfected_S1_R1_001", "DF.1P_uninfected_S2_R1_001", "DF.1P_uninfected_S3_R1_001")
+
+# Filtramos la matriz y transponemos
+X_basal <- as.matrix(t(conteos_filtrados[, muestras_basal]))
+
+# Etiquetas estrictas
+Y_basal <- factor(c(rep("WT_Sana", 3), rep("Persistente_Basal", 3)))
+
+# 2. Entrenamos el Micro-Random Forest
+set.seed(42)
+modelo_basal <- randomForest(x = X_basal, y = Y_basal, importance = TRUE, ntree = 500)
+
+# 3. Evaluación del modelo
+error_oob_basal <- modelo_basal$err.rate[500, "OOB"]
+
+cat("\n============================================================\n")
+cat("RESULTADOS DEL MICRO-MODELO IA (WT SANA vs PERSISTENTE BASAL)\n")
+cat("============================================================\n")
+cat("Tasa de Error (OOB): ", round(error_oob_basal * 100, 2), "%\n\n", sep="")
+cat("Matriz de Confusión:\n")
+print(modelo_basal$confusion[, 1:2])
+
+# 4. Si el modelo es capaz de ver la diferencia, extraemos el Top 5 de rutas chivatas
+if(error_oob_basal < 0.40) {
+  cat("\n¡La IA distingue los estados! Aquí está el Top 5 que delata a la célula persistente:\n")
+  imp_basal <- as.data.frame(importance(modelo_basal))
+  imp_basal$ID_GO <- rownames(imp_basal)
+  
+  top_basal <- merge(imp_basal, diccionario_gallus, by = "ID_GO", all.x = TRUE) %>%
+    mutate(Nombre_Limpio = ifelse(is.na(Nombre) | Nombre == "", ID_GO, Nombre)) %>%
+    arrange(desc(MeanDecreaseAccuracy)) %>%
+    head(5) %>%
+    dplyr::select(ID_GO, Proceso = Nombre_Limpio, Importancia = MeanDecreaseAccuracy)
+  
+  print(top_basal)
+} else {
+  cat("\nLa IA no logra separarlas de forma consistente.\n")
+}
+#Tasa de Error (OOB): 0%
+#                  Persistente_Basal WT_Sana
+#Persistente_Basal                 3       0
+#WT_Sana                           0       3
+
+Top 5 que delata a la célula persistente:
+  ID_GO
+1 GO:0000049
+2 GO:0000724
+3 GO:0000981
+4 GO:0001540
+5 GO:0003746
+Proceso
+1                                                          tRNA binding
+2               double-strand break repair via homologous recombination
+3 DNA-binding transcription factor activity, RNA polymerase II-specific
+4                                                  amyloid-beta binding
+5                                translation elongation factor activity
+Importancia
+1    1.001002
+2    1.001002
+3    1.001002
+4    1.001002
+5    1.001002
+
+
+##########################################################
+#### RANDOM FOREST: DF.1P vs DF.1P_IBDV###################
+##########################################################
+library(randomForest)
+
+muestras_lupa <- c("DF.1P_uninfected_S1_R1_001", "DF.1P_uninfected_S2_R1_001", "DF.1P_uninfected_S3_R1_001",
+                   "DF.1P_IBDV_S1_R1_001", "DF.1P_IBDV_S2_R1_001", "DF.1P_IBDV_S3_R1_001")
+
+# Filtramos la matriz y transponemos
+X_lupa <- as.matrix(t(conteos_filtrados[, muestras_lupa]))
+
+# Etiquetas estrictas
+Y_lupa <- factor(c(rep("Persistente_Basal", 3), rep("Persistente_Superinfectada", 3)))
+
+# Entrenamos el Random Forest
+set.seed(42)
+modelo_lupa <- randomForest(x = X_lupa, y = Y_lupa, importance = TRUE, ntree = 500)
+
+# Evaluación 
+error_oob <- modelo_lupa$err.rate[500, "OOB"]
+
+cat("\n============================================================\n")
+cat("RESULTADOS DEL MICRO-MODELO IA (PRUEBA DE REFRACTARIEDAD)\n")
+cat("============================================================\n")
+cat("Tasa de Error (OOB): ", round(error_oob * 100, 2), "%\n\n", sep="")
+cat("Matriz de Confusión:\n")
+print(modelo_lupa$confusion[, 1:2])
+
+if(error_oob < 0.40) {
+  cat("\n¡La IA ha encontrado diferencias sutiles!\n")
+  imp_lupa <- as.data.frame(importance(modelo_lupa))
+  imp_lupa$ID_GO <- rownames(imp_lupa)
+  
+  top_lupa <- merge(imp_lupa, diccionario_gallus, by = "ID_GO", all.x = TRUE) %>%
+    mutate(Nombre_Limpio = ifelse(is.na(Nombre) | Nombre == "", ID_GO, Nombre)) %>%
+    arrange(desc(MeanDecreaseAccuracy)) %>%
+    head(5) %>%
+    dplyr::select(ID_GO, Proceso = Nombre_Limpio, Importancia = MeanDecreaseAccuracy)
+  
+  print(top_lupa)
+} else {
+  cat("\nLa IA confirma a DESeq2: Los estados son transcriptómicamente indistinguibles.\n")
+}
+#RESULTADOS DEL MICRO-MODELO IA (PRUEBA DE REFRACTARIEDAD)
+#Tasa de Error (OOB): 83.33%
+
+#                                Persistente_Basal
+#Persistente_Basal                          1
+#Persistente_Superinfectada                 3
+#                                Persistente_Superinfectada
+#Persistente_Basal                                   2
+#Persistente_Superinfectada                          0
+#La IA confirma a DESeq2: Los estados son transcriptómicamente indistinguibles.
+
+
+
+# ==============================================================================
+# MODELO IA: sPLS-DA 
+# ==============================================================================
+set.seed(42)
+modelo_splsda <- splsda(X_ml, Y_ml, ncomp = 2, keepX = c(20, 20))
+
+# Extraer los biomarcadores del Componente 1 (el que maximiza la separación de los 6 grupos)
+loadings_c1 <- selectVar(modelo_splsda, comp = 1)$value
+loadings_c1$ID_GO <- rownames(loadings_c1)
+
+top20_splsda <- merge(loadings_c1, diccionario_gallus, by = "ID_GO") %>%
+  mutate(Nombre_Corto = str_trunc(Nombre, width = 50, side = "right")) %>%
+  arrange(value.var) %>%
+  mutate(Nombre_Corto = factor(Nombre_Corto, levels = Nombre_Corto))
+
+# Gráfico sPLS-DA
+grafico_splsda_estetico <- ggplot(top20_splsda, aes(x = value.var, y = Nombre_Corto, fill = value.var > 0)) +
+  geom_bar(stat = "identity", color = "black", linewidth = 0.5, width = 0.8) +
+  # Azul oscuro para valores positivos, azul claro para negativos
+  scale_fill_manual(values = c("TRUE" = "#045a8d", "FALSE" = "#a6bddb")) +
+  labs(
+    x = "Peso del Biomarcador (Loading de sPLS-DA Componente 1)",
+    y = "Proceso Funcional (GO)"
+  ) +
+  theme_classic(base_family = "sans", base_size = 12) +
+  theme(
+    axis.text.y = element_text(color = "black", size = 10, face = "bold"),
+    axis.text.x = element_text(color = "black", size = 11),
+    axis.title = element_text(face = "bold", size = 12),
+    legend.position = "none", # Ocultamos leyenda para máxima limpieza
+    panel.border = element_rect(colour = "black", fill = NA, linewidth = 1)
+  )
+
+print(grafico_splsda_estetico)
+ggsave("ML_sPLSDA_Invitro_Estetico.png", plot = grafico_splsda_estetico, width = 10, height = 7, dpi = 300)
+
+##########################################################
+#### sPLS-DA: DF.1_uninfected vs DF.1P_uninfected#########
+##########################################################
+
+library(mixOmics)
+library(ggplot2)
+library(dplyr)
+library(stringr)
+
+muestras_c1 <- c("DF.1_uninfected_S1_R1_001", "DF.1_uninfected_S2_R1_001", "DF.1_uninfected_S3_R1_001",
+                 "DF.1P_uninfected_S1_R1_001", "DF.1P_uninfected_S2_R1_001", "DF.1P_uninfected_S3_R1_001")
+
+X_c1 <- as.matrix(t(conteos_filtrados[, muestras_c1]))
+Y_c1 <- factor(c(rep("WT_Sana", 3), rep("Persistente_Basal", 3)), levels = c("WT_Sana", "Persistente_Basal"))
+
+set.seed(42)
+splsda_c1 <- splsda(X_c1, Y_c1, ncomp = 2, keepX = c(15, 15))
+
+# Extracción y limpieza de datos
+loadings_c1 <- selectVar(splsda_c1, comp = 1)$value
+loadings_c1$ID_GO <- rownames(loadings_c1)
+
+df_plot_c1 <- merge(loadings_c1, diccionario_gallus, by = "ID_GO", all.x = TRUE) %>%
+  mutate(Nombre_Limpio = ifelse(is.na(Nombre) | Nombre == "", ID_GO, Nombre)) %>%
+  mutate(Nombre_Corto = str_trunc(Nombre_Limpio, width = 45, side = "right")) %>%
+  arrange(value.var) %>%
+  mutate(Nombre_Corto = factor(make.unique(as.character(Nombre_Corto)), levels = make.unique(as.character(Nombre_Corto))))
+
+#  gráfico 
+plot_c1 <- ggplot(df_plot_c1, aes(x = value.var, y = Nombre_Corto, fill = value.var > 0)) +
+  geom_bar(stat = "identity", color = "black", linewidth = 0.5, width = 0.8) +
+  scale_fill_manual(values = c("TRUE" = "#045a8d", "FALSE" = "#a6bddb")) +
+  labs(title = "Firma sPLS-DA: WT Sana vs DF.1P Basal", x = "Peso del Biomarcador (Loading)", y = "") +
+  theme_classic(base_family = "sans", base_size = 12) +
+  theme(legend.position = "none", axis.text.y = element_text(color = "black", face = "bold"),
+        panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
+        plot.title = element_text(hjust = 0.5, face = "bold"))
+
+print(plot_c1)
+ggsave("sPLSDA_WT_vs_DF1P_Basal.png", plot = plot_c1, width = 9, height = 6, dpi = 300)
+
+
+
+##########################################################
+#### sPLS-DA: DF.1P vs DF.1P_IBDV###################
+##########################################################
+muestras_c2 <- c("DF.1_uninfected_S1_R1_001", "DF.1_uninfected_S2_R1_001", "DF.1_uninfected_S3_R1_001",
+                 "DF.1P_IBDV_S1_R1_001", "DF.1P_IBDV_S2_R1_001", "DF.1P_IBDV_S3_R1_001")
+
+X_c2 <- as.matrix(t(conteos_filtrados[, muestras_c2]))
+Y_c2 <- factor(c(rep("WT_Sana", 3), rep("Persistente_IBDV", 3)), levels = c("WT_Sana", "Persistente_IBDV"))
+
+set.seed(42)
+splsda_c2 <- splsda(X_c2, Y_c2, ncomp = 2, keepX = c(15, 15))
+
+# Extracción y limpieza de datos
+loadings_c2 <- selectVar(splsda_c2, comp = 1)$value
+loadings_c2$ID_GO <- rownames(loadings_c2)
+
+df_plot_c2 <- merge(loadings_c2, diccionario_gallus, by = "ID_GO", all.x = TRUE) %>%
+  mutate(Nombre_Limpio = ifelse(is.na(Nombre) | Nombre == "", ID_GO, Nombre)) %>%
+  mutate(Nombre_Corto = str_trunc(Nombre_Limpio, width = 45, side = "right")) %>%
+  arrange(value.var) %>%
+  mutate(Nombre_Corto = factor(make.unique(as.character(Nombre_Corto)), levels = make.unique(as.character(Nombre_Corto))))
+
+# gráfico 
+plot_c2 <- ggplot(df_plot_c2, aes(x = value.var, y = Nombre_Corto, fill = value.var > 0)) +
+  geom_bar(stat = "identity", color = "black", linewidth = 0.5, width = 0.8) +
+  scale_fill_manual(values = c("TRUE" = "#045a8d", "FALSE" = "#a6bddb")) +
+  labs(title = "Firma sPLS-DA: WT Sana vs DF.1P + IBDV", x = "Peso del Biomarcador (Loading)", y = "") +
+  theme_classic(base_family = "sans", base_size = 12) +
+  theme(legend.position = "none", axis.text.y = element_text(color = "black", face = "bold"),
+        panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
+        plot.title = element_text(hjust = 0.5, face = "bold"))
+
+print(plot_c2)
+ggsave("sPLSDA_WT_vs_DF1P_IBDV.png", plot = plot_c2, width = 9, height = 6, dpi = 300)
+
+
+
+# ==============================================================================
+# MODELO ESTADISTICO CLASICO: DESeq2
+# ==============================================================================
+##########################################
+####DF.1_uninfected vs DF.1P_uninfected###
+##########################################
+
+library(DESeq2)
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+
+#seleccionamos muestras
+muestras_puras <- c(
+  "DF.1_uninfected_S1_R1_001", "DF.1_uninfected_S2_R1_001", "DF.1_uninfected_S3_R1_001",
+  "DF.1P_uninfected_S1_R1_001", "DF.1P_uninfected_S2_R1_001", "DF.1P_uninfected_S3_R1_001"
+)
+
+# Filtramos tu matriz original y redondeamos a enteros
+conteos_puros <- round(conteos_invitro[, muestras_puras])
+
+# Creamos los metadatos
+# Ponemos 'DF1_WT_Sana' = el cero de referencia
+condicion_pura <- factor(
+  c(rep("DF1_WT_Sana", 3), rep("DF1P_Persistente", 3)),
+  levels = c("DF1_WT_Sana", "DF1P_Persistente")
+)
+diseno_puro <- data.frame(Condicion = condicion_pura)
+rownames(diseno_puro) <- colnames(conteos_puros)
+
+# DESeq2
+cat("Ejecutando DESeq2: WT Sana vs Persistente...\n")
+dds_puro <- DESeqDataSetFromMatrix(countData = conteos_puros,
+                                   colData = diseno_puro,
+                                   design = ~ Condicion)
+dds_puro <- DESeq(dds_puro)
+
+# Extraemos y limpiamos los resultados
+res_puro <- results(dds_puro, contrast = c("Condicion", "DF1P_Persistente", "DF1_WT_Sana"))
+res_df_puro <- as.data.frame(res_puro)
+res_df_puro$ID_GO <- rownames(res_df_puro)
+
+res_df_puro <- na.omit(merge(res_df_puro, diccionario_gallus, by = "ID_GO", all.x = TRUE))
+
+# Clasificación (P-valor < 0.05 y Log2FC extremo)
+res_df_puro <- res_df_puro %>%
+  mutate(Regulacion = case_when(
+    padj < 0.05 & log2FoldChange > 1 ~ "Sobreexpresado (Supervivencia)",
+    padj < 0.05 & log2FoldChange < -1 ~ "Silenciado (Camuflaje)",
+    TRUE ~ "No Significativo"
+  ))
+
+# Imprimimos en consola cuántas rutas salen alteradas
+resumen_rutas <- table(res_df_puro$Regulacion)
+cat("\n--- RESULTADOS DEL CONTRASTE ---\n")
+print(resumen_rutas[names(resumen_rutas) != "No Significativo"])
+
+# Volcano Plot
+top_rutas_puras <- res_df_puro %>%
+  filter(Regulacion != "No Significativo") %>%
+  arrange(padj) %>%
+  head(15)
+
+volcano_puro <- ggplot(res_df_puro, aes(x = log2FoldChange, y = -log10(padj), color = Regulacion)) +
+  geom_point(alpha = 0.7, size = 2.5) +
+  scale_color_manual(values = c("Silenciado (Camuflaje)" = "#3182bd", 
+                                "No Significativo" = "grey85", 
+                                "Sobreexpresado (Supervivencia)" = "#de2d26")) +
+  geom_vline(xintercept = c(-1, 1), linetype = "dashed", color = "black", linewidth = 0.5) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black", linewidth = 0.5) +
+  geom_text_repel(data = top_rutas_puras, 
+                  aes(label = stringr::str_trunc(Nombre, width = 40, side = "right")), 
+                  size = 3.5, fontface = "bold", color = "black",
+                  box.padding = 0.5, max.overlaps = Inf) +
+  labs(
+    title = "Firma Transcriptómica: Célula Persistente vs Control",
+    x = expression(bold("Log"[2]*" Fold Change")),
+    y = expression(bold("-Log"[10]*" (P-valor Ajustado)")),
+    color = "Mecanismo Basal"
+  ) +
+  theme_classic(base_family = "sans", base_size = 12) +
+  theme(
+    legend.position = "top",
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    panel.border = element_rect(colour = "black", fill = NA, linewidth = 1)
+  )
+
+print(volcano_puro)
+ggsave("Volcano_DF1_vs_DF1P_Basal.png", plot = volcano_puro, width = 11, height = 7, dpi = 300)
+
+
+### LAS 7 RUTAS CLAVE
+library(dplyr)
+library(readr)
+
+# Filtramos 
+firma_persistencia <- res_df_puro %>%
+  filter(Regulacion != "No Significativo") %>%
+  arrange(log2FoldChange) %>% # Ordenamos desde el silenciamiento a la sobreexpresión
+  dplyr::select(ID_GO, Nombre, log2FoldChange, Regulacion)
+
+#imprimimos
+cat("\n============================================================\n")
+cat("LA HUELLA DE LA PERSISTENCIA (7 RUTAS)\n")
+cat("============================================================\n")
+print(firma_persistencia)
+
+write_csv(firma_persistencia, "Firma_Persistencia_DF1_vs_DF1P.csv")
+
+
+##########################################
+####DF.1_uninfected vs DF.1P_IBDV#########
+##########################################
+
+# Selección de muestras (Control sano vs Persistente infectada)
+muestras_desafio <- c(
+  "DF.1_uninfected_S1_R1_001", "DF.1_uninfected_S2_R1_001", "DF.1_uninfected_S3_R1_001",
+  "DF.1P_IBDV_S1_R1_001", "DF.1P_IBDV_S2_R1_001", "DF.1P_IBDV_S3_R1_001"
+)
+
+conteos_desafio <- round(conteos_invitro[, muestras_desafio])
+
+# Metadatos
+condicion_desafio <- factor(
+  c(rep("DF1_WT_Sana", 3), rep("DF1P_Infectada", 3)),
+  levels = c("DF1_WT_Sana", "DF1P_Infectada")
+)
+diseno_desafio <- data.frame(Condicion = condicion_desafio)
+rownames(diseno_desafio) <- colnames(conteos_desafio)
+
+# DESeq2
+dds_desafio <- DESeqDataSetFromMatrix(countData = conteos_desafio,
+                                      colData = diseno_desafio,
+                                      design = ~ Condicion)
+dds_desafio <- DESeq(dds_desafio)
+
+# Extracción de resultados
+res_desafio <- results(dds_desafio, contrast = c("Condicion", "DF1P_Infectada", "DF1_WT_Sana"))
+res_df_desafio <- as.data.frame(res_desafio)
+res_df_desafio$ID_GO <- rownames(res_df_desafio)
+res_df_desafio <- na.omit(merge(res_df_desafio, diccionario_gallus, by = "ID_GO", all.x = TRUE))
+
+# Clasificación
+res_df_desafio <- res_df_desafio %>%
+  mutate(Regulacion = case_when(
+    padj < 0.05 & log2FoldChange > 1 ~ "Sobreexpresado (Supervivencia)",
+    padj < 0.05 & log2FoldChange < -1 ~ "Silenciado (Camuflaje)",
+    TRUE ~ "No Significativo"
+  ))
+
+# Resultado numérico
+resumen_desafio <- table(res_df_desafio$Regulacion)
+cat("\n--- RESULTADOS DEL CONTRASTE (DESAFÍO VIRAL) ---\n")
+print(resumen_desafio[names(resumen_desafio) != "No Significativo"])
+
+# Volcano Plot 
+volcano_desafio <- ggplot(res_df_desafio, aes(x = log2FoldChange, y = -log10(padj), color = Regulacion)) +
+  geom_point(alpha = 0.7, size = 2.5) +
+  scale_color_manual(values = c("Silenciado (Camuflaje)" = "#3182bd", 
+                                "No Significativo" = "grey85", 
+                                "Sobreexpresado (Supervivencia)" = "#de2d26")) +
+  geom_vline(xintercept = c(-1, 1), linetype = "dashed", color = "black", linewidth = 0.5) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black", linewidth = 0.5) +
+  labs(
+    title = "Respuesta ante el Desafío Viral (DF1 vs DF1P+IBDV)",
+    x = "Log2 Fold Change",
+    y = "-Log10 (P-valor Ajustado)"
+  ) +
+  theme_classic() + theme(legend.position = "top")
+
+print(volcano_desafio)
+
+
+##Lista de rutas
+# Filtramos para quedarnos estrictamente con las 6 significativas
+firma_desafio <- res_df_desafio %>%
+  filter(Regulacion != "No Significativo") %>%
+  arrange(log2FoldChange) %>% # Ordenamos desde el silenciamiento a la sobreexpresión
+  dplyr::select(ID_GO, Nombre, log2FoldChange, Regulacion)
+
+cat("\n============================================================\n")
+cat("LA HUELLA DEL DESAFÍO VIRAL (6 RUTAS)\n")
+cat("============================================================\n")
+print(firma_desafio)
+
+write_csv(firma_desafio, "Firma_Desafio_DF1_vs_DF1P_IBDV.csv")
+
+
+# ==============================================================================
+# MODELO ESTADISTICO CLASICO: EdgeR
+# ==============================================================================
+##########################################
+####DF.1_uninfected vs DF.1P_uninfected###
+##########################################
+
+library(edgeR)
+library(dplyr)
+library(readr)
+
+correr_edgeR <- function(muestras, nombre_condicion_1, nombre_condicion_2) {
+  
+  #Extraer conteos y crear metadatos
+  conteos_subset <- round(conteos_invitro[, muestras])
+  grupo <- factor(c(rep(nombre_condicion_1, 3), rep(nombre_condicion_2, 3)), 
+                  levels = c(nombre_condicion_1, nombre_condicion_2))
+  
+  # DGEList de edgeR
+  y <- DGEList(counts = conteos_subset, group = grupo)
+  
+  # Filtrado y Normalización TMM
+  keep <- filterByExpr(y)
+  y <- y[keep, , keep.lib.sizes = FALSE]
+  y <- calcNormFactors(y)
+  
+  # Diseño del modelo y estimación de dispersión
+  design <- model.matrix(~grupo)
+  y <- estimateDisp(y, design)
+  
+  # Ajuste del modelo Quasi-Likelihood (recomendado para RNA-seq)
+  fit <- glmQLFit(y, design)
+  qlf <- glmQLFTest(fit, coef = 2)
+  
+  # resultados 
+  res_edgeR <- topTags(qlf, n = Inf)$table
+  res_edgeR$ID_GO <- rownames(res_edgeR)
+  
+  # Cruzar con el diccionario de Gallus gallus y clasificar
+  res_edgeR <- merge(res_edgeR, diccionario_gallus, by = "ID_GO", all.x = TRUE) %>%
+    mutate(Nombre_Limpio = ifelse(is.na(Nombre) | Nombre == "", ID_GO, Nombre)) %>%
+    mutate(Regulacion = case_when(
+      FDR < 0.05 & logFC > 1 ~ "Sobreexpresado (Supervivencia)",
+      FDR < 0.05 & logFC < -1 ~ "Silenciado (Camuflaje)",
+      TRUE ~ "No Significativo"
+    ))
+  
+  return(res_edgeR)
+}
+
+
+muestras_basal <- c("DF.1_uninfected_S1_R1_001", "DF.1_uninfected_S2_R1_001", "DF.1_uninfected_S3_R1_001",
+                    "DF.1P_uninfected_S1_R1_001", "DF.1P_uninfected_S2_R1_001", "DF.1P_uninfected_S3_R1_001")
+
+res_edgeR_basal <- correr_edgeR(muestras_basal, "WT_Sana", "Persistente_Basal")
+
+cat("\n============================================================\n")
+cat("RESULTADOS edgeR: WT SANA vs DF.1P BASAL\n")
+cat("============================================================\n")
+resumen_basal_edgeR <- table(res_edgeR_basal$Regulacion)
+print(resumen_basal_edgeR[names(resumen_basal_edgeR) != "No Significativo"])
+
+# Guardar firma significativa
+firma_edgeR_basal <- res_edgeR_basal %>% filter(Regulacion != "No Significativo") %>% arrange(logFC)
+write_csv(firma_edgeR_basal, "Firma_edgeR_WT_vs_DF1P_Basal.csv")
+
+
+
+##########################################
+####DF.1_uninfected vs DF.1P_IBDV#########
+##########################################
+
+muestras_desafio <- c("DF.1_uninfected_S1_R1_001", "DF.1_uninfected_S2_R1_001", "DF.1_uninfected_S3_R1_001",
+                      "DF.1P_IBDV_S1_R1_001", "DF.1P_IBDV_S2_R1_001", "DF.1P_IBDV_S3_R1_001")
+
+res_edgeR_desafio <- correr_edgeR(muestras_desafio, "WT_Sana", "Persistente_Superinfectada")
+
+cat("\n============================================================\n")
+cat("RESULTADOS edgeR: WT SANA vs DF.1P SUPERINFECTADA (IBDV)\n")
+cat("============================================================\n")
+resumen_desafio_edgeR <- table(res_edgeR_desafio$Regulacion)
+print(resumen_desafio_edgeR[names(resumen_desafio_edgeR) != "No Significativo"])
+
+# Guardar firma significativa
+firma_edgeR_desafio <- res_edgeR_desafio %>% filter(Regulacion != "No Significativo") %>% arrange(logFC)
+write_csv(firma_edgeR_desafio, "Firma_edgeR_WT_vs_DF1P_IBDV.csv")
+
+cat("\n✓ Análisis con edgeR finalizado. Tablas exportadas para los Anexos.\n")
