@@ -1,0 +1,2031 @@
+#!/usr/bin/env Rscript
+
+####ARTIFICIAL INTELLIGENCE####
+
+#Packages
+library(tools)
+library(rlang)
+library(dplyr)
+library(tidyr)
+library(NMF)
+library(kohonen)
+library(randomForest)
+library(ranger)
+library(ggplot2)
+library(caret)
+library(RRF)
+library(lattice)
+library(vita)
+library(topicmodels)
+library(tidytext)
+library(tm)
+library(text)
+library(uwot)
+library(tidyverse)
+library(proxy)   
+library(pheatmap)
+library(igraph)
+library(ggraph)
+library(tidygraph)
+lubrary(ggrepel)
+library(tidytext)
+
+
+### VARIABLES
+
+bm.1.file <- "./biomaRt.annotation.1st.txt" ###cambiado
+folder <- "/mnt/jr/SCIENTIFICEXT/SCIENTIFIC/work/pamela/RNAseqAI/data/Cj_PFU"
+folder <- '.'
+
+
+
+
+
+
+
+
+# MAGIC MAGIC MAGIC MAGIC MAGIC MAGIC MAGIC MAGIC
+#' my.name()
+#'
+#' my.name() obtains the name of the function that called it
+#'
+#' This function will return the name of the calling function.
+#' The CALLING function !!!
+#' THE CALLING FUNCTION !!!!!!
+#' It is intended as a way to obtain a function's own name for error
+#' reporting. 
+#  We could do it directly, within a function using 
+#  my.name <- deparse(sys.call())
+#  but it would be difficult to understand. Isolating this in a function
+#  call makes it more readable.
+#'
+#' 
+#' @return	the name of the calling function (one up in the call stack)
+#'
+#' @usage	me <- my.name()
+#'
+#' @examples
+#'	f <- function() { print(my.name()) }
+#'	f()
+#'	##[1] "print(my.name())"
+#'	## my.name() is being passed to print() as an argument and is thus
+#'	## called by 'print', hence the output
+#'	##
+#'	f <- function() { me <- my.name() ; print(me) }
+#'	f()
+#'	##[1] "f()"
+#'	## my.name() is called by f() to obtain its own name and then the name
+#'	## is handled to print().
+#'
+#' @author	(C) CNB-CSIC
+#'
+#' @license	EU-GPL
+#'
+#' @export
+#
+my.name <- function(verbose=F) { 
+	my.call.number <- sys.nframe()
+	if (my.call.number == 1) {
+	    # we are at the script/command line top level
+		top.file <- sys.frame(1)$ofile
+	    if (is.null(top.file))
+		    caller <- "R"
+		else {
+		    caller <- top.file
+            if (verbose == FALSE) caller <- basename(caller)
+		}
+	} else {
+    	caller <- deparse(sys.call(-1)) 
+		if (! verbose) caller <- gsub('\\(.*', '', as.character(caller))
+		#who.called.me <- deparse( sys.calls()[[ my.parent.number ]] )
+		#return( who.called.me )
+    }
+    return(caller)
+}
+
+# MAGIC MAGIC MAGIC MAGIC MAGIC MAGIC MAGIC MAGIC
+# alternative (and simpler) implementation
+me <- function(..., verbose=F) {
+    if (sys.nframe() == 1) callingFun <- "R"
+    else callingFun = as.list(sys.call(-1))[[1]]
+	
+    calledFun = as.list(sys.call())[[1]]
+    if (verbose) message(paste(callingFun, " is calling ", calledFun, sep=""))
+	return(callingFun)
+}
+
+
+# MAGIC MAGIC MAGIC MAGIC MAGIC MAGIC MAGIC MAGIC
+my.caller <- function(verbose=F) {
+	my.call.number <- sys.nframe()
+	if (my.call.number <= 2) {
+	    # we are at the script/command line top level
+		# or colled by a function whose parent is the
+		# top level
+		top.file <- sys.frame(1)$ofile
+	    if (is.null(top.file))
+		    caller <- "R"
+		else {
+		    caller <- top.file
+            if (verbose == FALSE) caller <- basename(caller)
+		}
+	} else {
+    	caller <- deparse(sys.call(-2)) 
+		if (! verbose) caller <- gsub('\\(.*', '', as.character(caller))
+		#who.called.me <- deparse( sys.calls()[[ my.parent.number ]] )
+		#return( who.called.me )
+    }
+    return(caller)
+}
+
+
+#' cat.err()
+#'
+#' err() prints a generic error message using cat()
+#'
+#' @param	abort	(boolean) whether the program should be stopped
+#'			(defaults to FALSE)
+#' @param	...	The message to print and cat options (see cat())
+#'
+#' @return	whatever cat() returns
+#'
+#' @usage	cat.err('some message\n', sep='')
+#'
+#' @examples
+#'		f <- function(x) { if (x < 10) {print(x)} else {cat.err(x, "is too big\n")}}
+#'		f(13)
+#'		##ERROR in  f(13) : 13 is too big
+#'
+#' @author	(C) CNB-CSIC
+#'
+#' @license	EU-GPL
+#'
+#' @export
+#
+cat.err <- function(..., abort=FALSE, verbose=T) { 
+    # error messages should be always printed
+	# so we will ignore the verbose argument
+	verbose <- TRUE
+
+    # caller <- mycaller()
+    #caller <- deparse( sys.calls()[[sys.nframe()-1]] )
+    caller <- my.caller(verbose=verbose)
+    cat('ERROR in ', caller, ":", ...)
+    if (abort) {
+        quit(save="no", status=1, runLast=FALSE)
+    }
+}
+
+
+#' cat.warn()
+#'
+#' cat.warn() prints a generic warning message using cat()
+#'
+#' @param	...	The message to print and cat options (see cat())
+#'
+#' @return	whatever cat() returns
+#'
+#' @usage	cat.warn('some message\n', sep='')
+#'
+#' @examples
+#'		f <- function(x) { if (x < 10) {print(x)} else {cat.warn(x, "is too big\n")}}
+#'		f(13)
+#'		##WARNING in  f(13) : 13 is too big
+#'
+#' @author	(C) CNB-CSIC
+#'
+#' @license	EU-GPL
+#'
+#' @export
+#
+cat.warn <- function(..., verbose=F) { 
+    #caller <- deparse( sys.calls()[[sys.nframe()-1]] )
+    #me <- as.list(sys.call())[[1]]
+    #parent <- as.list(sys.call(-1))[[1]]
+	caller <- my.caller(verbose=verbose)
+	cat('WARNING in ', caller, ":", ...)
+}
+
+
+#' cat.info()
+#'
+#' cat.info() prints a generic information message using cat()
+#'
+#' @param	...	The message to print and cat options (see cat())
+#'
+#' @return	whatever cat() returns
+#'
+#' @usage	cat.warn('some message\n', sep='')
+#'
+#' @examples
+#'		f <- function(x) { if (x < 10) {print(x)} else {cat.info(x, "is too big\n")}}
+#'		f(13)
+#'		##INFO  f(13) : 13 is too big
+#'
+#' @author	(C) CNB-CSIC
+#'
+#' @license	EU-GPL
+#'
+#' @export
+#
+cat.info <- function(..., verbose=F) { 
+    #caller <- deparse( sys.calls()[[sys.nframe()-1]] )
+    #me <- as.list(sys.call())[[1]]
+    #parent <- as.list(sys.call(-1))[[1]]
+    caller <- my.caller(verbose=verbose)
+    cat('INFO ', caller, ":", ...)
+}
+
+###############################################################################
+##################   EMPEZAMOS      ###########################################
+###############################################################################
+
+###1. LOAD OUR DATA
+
+load_coturnix_norm_count_data <- function(file="normalized_counts.tab", select=NULL) {
+    # load normalized counts of all genesl
+    nc <- read.table(file=file, row.names=1)
+    tnc <- t(nc)
+    # prepend a column with infection levels
+    # upon read columns are not preserved
+    #tnc <- cbind(c(rep(0, 3), rep(0.1, 3), rep(1.0,3), rep(10.0,3), rep(100.0,3)), tnc)
+    # so we will fix the labels
+    pfu <- rownames(tnc)
+    pfu <- sub('^X', '', pfu)
+    pfu <- sub('pfu.*', '', pfu)
+    pfu <- sub('wt.*', '0.0', pfu)
+    pfu <- as.numeric(pfu)
+    
+    # amend nc and tnc to include a 'pfu' row/column
+    nc <- rbind(pfu=pfu, nc)
+    tnc <- cbind(pfu=pfu, tnc)
+    tnc <- as.data.frame( tnc )		# just in case
+
+    if ( ! is.null(select)) {
+        # select only counts of sigfigicantly altered genes:
+        sig.nc <- rbind(pfu=nc[1, ], nc[rownames(nc) %in% select, ])
+        sig.tc <- cbind(pfu=tnc[ ,1], tnc[ , colnames(tnc) %in% select, ] )
+    #tc <- sig.tc
+    } else {
+        sig.nc <- nc
+        sig.tc <- tnc
+    }
+
+    # tc now contains the significant transposed normalized counts	(15x8954)
+    # nc contains the significant normalized counts	(8954x15)
+
+    return(list( all_norm_counts=nc, transp_norm_counts=tnc,
+                 signif_norm_counts=sig.nc,
+                 signif_transp_norm_counts=sig.tc))
+}
+
+
+
+
+
+##2. GET ANNOTATION
+
+get.biomart.goslim.annotation <- function(mart.db, folder) {
+    
+    file.path <- paste(folder, "/biomart.goslim.tab", sep="")
+    
+    if (!file.exists(file.path)) {
+        bm.goslim.annot <- getBM(
+            attributes=c(
+                "ensembl_gene_id", 
+                "goslim_goa_accession", 
+                "goslim_goa_description"
+                ),
+            mart=mart.db)
+        
+        write.table(bm.goslim.annot, file.path, 
+                    row.names=TRUE, col.names=TRUE, sep="\t")
+        
+    } else {
+        bm.goslim.annot <- read.table(file.path, header=TRUE, sep="\t")
+    }
+    
+    return(bm.goslim.annot)
+}
+
+
+get_annotation <- function(ensembl.db=NULL, biomart.db=NULL, verbose=F) {
+    if (verbose) cat.info('loading annotation\n')
+	
+    ensembl.annot <- NULL
+    bm.annot.1 <- NULL
+    if (! is.null(biomart.db) && file.exists(biomart.db)) {
+	    if (verbose) cat.info('loading', biomart.db, '\n')
+        # get file extension and convert to lower case to simplify checks
+		ext <- tolower(file_ext(biomart.db))
+        if (ext == 'tab' || ext == 'tsv' || ext == 'txt') {
+            # from .../signif: '../../biomaRt.annotation.1st.txt'
+            bm.annot.1 <- read.table(file=biomart.db, header=T)
+        } else if (ext == 'rds') {
+            bm.annot.1 <- readRDS(biomart.db)
+        } else {
+            cat.warn('extension of biomart database must be txt, tsv, tab or rds\n')
+        }
+    }
+    if (! is.null(ensembl.db) && file.exists(ensembl.db)) {
+	    if (verbose) cat.info("Loading ENSMBL annotation from", ensembl.db, '\n')
+        # get file extension and convert to lower case to simplify checks
+        ext <- tolower(file_ext(ensembl.db))
+        if (ext == 'tab' || ext == 'tsv' || ext == 'txt') {
+            # from .../signif: '../../../../net.EnsDb/net.ens.db.rds'
+            ensembl.annot <- readRDS(file=ensembl.db)
+        } else if (ext == 'rds') {
+            ensembl.annot <- readRDS(ensembl.db)
+        } else {
+            cat.warn('extension of ensembl database must be txt, tsv, tab or rds\n')
+        }
+    }
+    # we could also load an endsb.org.db package
+    # and then (but this currently doesn't work for some reason)
+    #ens.annot <- ensembldb::select(ens.db, column='GENEID', keytype='GENEID', keys=rownames(lfc), columns='SEQNAME')
+    # ensembldb::supportedFilters(ens.db)
+    # columns(edb)
+    # listColumns(edb)
+    # keytypes(edb)
+    # gids <- keys(edb, keytype = "GENEID")
+    # length(gids)
+    #ens.ann <- AnnotationDbi::select(ens.db, 
+    #              column='GENID', keytype= 'GENEID', keys=rownames(lfc), 
+    #              columns= c('SEQNAME', 'SYMBOL', 'DESCRIPTION', # no longer available
+    #                         'GENENAME', 'GENEID', 'ENTREZID', # empty
+    #                         'TXID', 'TXBIOTYPE', # these make the call fail
+    #                         'PROTEINID', 'UNIPROTID' # no longer available
+    #                          )
+    #              )
+
+    return( list(ensembl=ensembl.annot, biomart=bm.annot.1) )
+}
+
+
+# 3. ENRIQUECIMIENTO DE GENES 
+
+enrich_genes <- function(data, ann, data.genes='ensembl_gene_id', ann.genes=data.genes) {
+    # add the annotation as additional columns to data, using as the
+    # column data.genes from data as index into ann.genes to find the
+    # corresponding annotation.
+    #
+    # use as
+    #	annotated.data <- enrich_genes(data, "ensembl.gene.id", ensembl.ann, "GENEID")
+    #	annotated.data <- enrich_genes(data, "ensembl.gene.id", biomart.ann, "ensembl_gene_id")
+    #   annotated.data <- enrich
+	# for ENTREZGENE datanormalized_counts.tab
+	# annotated.data <- enrich_genes(data, "gene.id", biomart.ann, "ensembl_gene_id")
+	
+    enrich_genes <- cbind(data, ann[match(data[ , data.genes], ann[ ,ann.genes]), ]) 
+
+    return(enrich_genes)
+}
+
+#Hasta aquí solo hay funciones que debemos aplicar para nuestro proyecto
+
+##
+##
+## EMPIEZA EL TRABAJO
+##
+##
+
+
+list.files()
+mis.datos <- load_coturnix_norm_count_data('normalized_counts.tab')
+data <- load_coturnix_norm_count_data() # this is the same because the default file is normalized_counts.tab
+summary(data) #visualization
+#                         Length Class    Mode
+#all_norm_counts            15   data.frame list
+#transp_norm_counts        17840 data.frame list 
+#signif_norm_counts        15    data.frame list 
+#signif_transp_norm_counts 17840 data.frame list
+
+
+ann <- get_annotation(ensembl.db=NULL, 
+                      biomart.db='./biomaRt.annotation.1st.txt')
+
+bio.ann <- ann$biomart
+
+
+summary(ann)   #visualización 
+# ensembl_gene_id    goslim_goa_accession goslim_goa_description
+# Length:125742      Length:125742        Length:125742         
+# Class :character   Class :character     Class :character      
+# Mode  :character   Mode  :character     Mode  :character
+
+
+# get normalized counts from 'data' (which is a list of tables)
+all.counts <- data$all_norm_counts
+# add a column with gene names to all.counts
+gene.counts <- cbind(all.counts, ensembl_gene_id=rownames(all.counts))
+ann.counts <- enrich_genes(gene.counts, bio.ann,
+                               data.genes="ensembl_gene_id",
+                               ann.genes="ensembl_gene_id")
+
+# how many unique go_ids do we have in ann.counts?
+go <- data.frame(id=ann.counts$go_id, 
+                 name=ann.counts$name_1006, 
+                 def=ann.counts$definition_1006)
+# get go$id that are not duplicated
+go_ids <- na.omit(go$id[ !duplicated(go$id) ])
+length(go_ids)
+## 2109
+
+#go.sum <- aggregate(ann.counts$wt.R1.bam, by=list(Category=ann.counts$go_id), FUN=sum)
+# we have
+#   in all.counts
+#   exp1, exp2, exp3, ...
+#   in gene.counts
+#   exp1, exp2, exp3, ... ensembl_gene_id
+#   in ann.counts
+#   exp1, exp2, exp3, ... ensembl_gene_ig, goslim_acc, goslim_descr
+# we want to summarize by goslim_accession
+#   sum1, sum2, sum3, ... goslim_access, goslim_descr
+# so, we need to do
+# for each experiment
+#   obtain a table "GOslim_ac, sum" using aggregate
+#   and add it to the final table
+#
+# we start from a table that contains ONLY the GO accessions present in
+# our dataset
+gs <- data.frame(id=ann.counts$go_id, 
+                 nam=ann.counts$name_1006, 
+                 def=ann.counts$definition_1006)
+# how many genes do we have?
+dim(gs)
+##[1] 17840     3
+
+# this is the go data from ann.count, arranged by gene
+# we are cannot includegenes that contain NO GO annotation
+# because we are going to analyze GO annotation
+gs <- gs[ ! is.na(gs$id), ]    
+# how many are left?
+dim(gs)
+##[1] 12534     3
+# since we only have go data (no counts), many rows are duplicated
+gs <- na.omit(gs[ !duplicated(gs$id), ])
+# sanity check, how many unique go ids remain?
+dim(gs)
+##[1] 2109  3
+# OK, so now we have a table with all the GOs present
+
+# Next we want to add to this table the counts in each experiment
+go.sums <- gs       # use a copy to merge with the counts
+
+# we can get the experiment names from all.counts
+experiments <- names(all.counts)
+# so now we can do
+for (i in experiments) {
+    # obtain goslim summaries for this experiment
+    go.sum <- aggregate(
+        ann.counts[ ,i], 
+        by=list(Category=ann.counts$go_id), 
+        FUN=sum)
+    # goslim.sum uses as header "Category, x" which is "GO, sum"
+    # now we need to add this to the results table
+    # the results table go.sums initially has all GO in its own order
+    # goslim.sum may have many GOs, but in a different order or not all
+    # so we need to match goslim.sum values to go.sums values
+    # i.e. add goslim.sum$x when goslim.sum$Category matches go.sums$goslim_goa_accession
+    #
+    # Note: since some GOs may be in some samples but not others, we
+    # need to keep all go.sums rows
+    gsn <- names(go.sums)   # e.g. c(id, nam, def)
+    go.sums <-   merge(go.sums, go.sum, 
+                       by.x="id", 
+                       by.y="Category", 
+                       all.x=T, all.y=T)
+    names(go.sums) <- c(gsn, i)
+    # this is equivalent and does not require saving the previous names
+    #names(go.sums)[ length(names(go.sums)) ] <- i
+}
+
+
+
+
+##############################
+#######ANALYSIS NMF###########
+##############################
+#El análisis de Factorización de Matrices No Negativas (NMF) se implementó como 
+#una técnica de aprendizaje no supervisado para la reducción de la dimensionalidad 
+#y la extracción de patrones biológicos. A diferencia de otros métodos, el NMF 
+#permite una descomposición basada en partes, donde la matriz de expresión original
+# se factoriza en dos matrices de rango inferior: una matriz de 'Firmas' (W), 
+#que representa módulos de co-expresión funcional de términos Gene Ontology (GO)
+#, y una matriz de 'Coeficientes' (H), que cuantifica la contribución de dichas 
+#firmas en cada muestra experimental. Este enfoque facilitó la identificación 
+#de procesos celulares específicos (como la organización del Aparato de Golgi y
+#la actividad mitocondrial) que definen la respuesta celular frente a distintas cargas virales (PFU)."
+
+
+
+
+
+
+# now we need to think:
+#   We have three replicas of each experiment
+#   Can we tell the AI method that there are three replicas so it
+# can consider this fact when computing statistics?
+#   If we can, then it is better to give the three values because 
+# the AI method will know and compute more accurate statistics
+#   if we cannot, then we need to combine the three columns of each
+# experiment into a single one
+#
+# TIME TO STUDY THE AI METHOD THAT WE WILL USE
+# RTFM!
+
+# check that go.sums is OK
+dim(go.sums)
+#[1] 2109   18
+
+head(go.sums)
+#          id                                       nam
+#1                                                     
+#2 GO:0000010 trans-hexaprenyltranstransferase activity
+#3 GO:0000015         phosphopyruvate hydratase complex
+#4 GO:0000027          ribosomal large subunit assembly
+#5 GO:0000030              mannosyltransferase activity
+#6 GO:0000045                    autophagosome assembly
+#                                                                                                                                                                                                 def
+#1                                                                                                                                                                                                   
+#2                                                           Catalysis of the reaction: all-trans-hexaprenyl diphosphate + isopentenyl diphosphate = all-trans-heptaprenyl diphosphate + diphosphate.
+#3                                               A multimeric enzyme complex, usually a dimer or an octamer, that catalyzes the conversion of 2-phospho-D-glycerate to phosphoenolpyruvate and water.
+#
+#4                                                                            The aggregation, arrangement and bonding together of constituent RNAs and proteins to form the large ribosomal subunit.
+#5                                                                                  Catalysis of the transfer of a mannosyl group to an acceptor molecule, typically another carbohydrate or a lipid.
+#6 The formation of a double membrane-bounded structure, the autophagosome, that occurs when a specialized membrane sac, called the isolation membrane, starts to enclose a portion of the cytoplasm.
+#    wt.R1.bam   wt.R2.bam   wt.R3.bam X0.1pfu.R1.bam X0.1pfu.R2.bam
+#1 254309.5817 253118.7540 254019.5058    259990.0197    254406.3689
+#2    584.5446    566.0535    546.1744       636.0505       671.8349
+#3    149.0673    162.8931    140.6536       125.1851       113.4394
+#4    714.3504    702.0692    682.2613       650.7782       805.8107
+#5   1829.0050   1824.4026   1933.5305      1716.6921      1675.1866
+#6   1382.6407   1387.0346   1389.1827      1354.0236      1291.8397
+#  X0.1pfu.R3.bam X1pfu.R1.bam X1pfu.R2.bam X1pfu.R3.bam X10pfu.R1.bam
+#1    255394.1726  257107.4462 259006.96750  260402.5474   253264.8322
+#2       699.3264     699.4048    741.67364     779.7397      676.4884
+#3       128.9209     114.2882     83.93942     108.1205      237.8466
+#4       786.5103     728.7094    700.33034     721.2275      747.0058
+#5      1681.5367    1557.0548   1530.95471    1644.7039     1864.5264
+#6      1259.5294    1291.3591   1195.19705    1196.9578     1276.4834
+#  X10pfu.R2.bam X10pfu.R3.bam X100pfu.R1.bam X100pfu.R2.bam X100pfu.R3.bam
+#1   255184.0006   256780.7721    249277.3339    249102.7423    247177.2286
+#2      670.8204      708.7870       709.1452       679.4970       729.0680
+#3      222.1548      222.2881       688.3159       687.9510       705.9083
+#4      796.0547      767.2839       914.5985       970.1061       893.0389
+#5     1869.8030     1805.6033      1696.6466      1766.9035      1828.6917
+#6     1305.7040     1421.4739      1598.1805      1613.6732      1559.1125
+#
+
+##1. Limpieza de datos 
+##  This should not be necessary, because we already made sure
+##  that NA had been removed from the GO list and there were no
+##  duplicates
+go_clean <- go.sums %>%
+         distinct() %>% # Elimina filas exactamente iguales
+         filter(!is.na(id))
+         nrow(go_clean)  #[1] 24
+
+# and indeed, dimensions haven't changed
+dim(go_clean)
+#[1] 2109   18
+
+
+
+# extract numeric counts to a separate matrix
+# (remove annotation columns 1:3)
+matrix_nmf <- as.matrix(go_clean[, -1:-3])
+# Convertir la columna de GO en nombres de filas
+rownames(matrix_nmf) <- go_clean$id
+
+nrow(matrix_nmf)  #[1] 2109
+
+# Importante: El NMF no acepta valores de 0 en toda una fila
+matrix_nmf <- matrix_nmf[rowSums(matrix_nmf) > 0, ]
+
+
+##2. Rango de factorización.
+#Elegir el valor k (número de firmas o factores). 
+# Este paso busca el rango óptimo (k). Probamos de 2 a 6 firmas.
+# nrun=10 es para una prueba rápida, en un análisis real usa 50 o 100.
+estimate_k <- nmf(matrix_nmf, 2:6, nrun = 10, seed = 123456)
+plot(estimate_k)  #visualización
+
+#Tip: Busca el punto donde el Coeficiente de 
+#Correlación Cophenetic empieza a caer bruscamente. 
+#Ese suele ser el $k$ ideal.
+#Elegimos k=5 
+
+##3. Ejecución del NMF: 
+
+k_chosen <- 5
+res_nmf <- nmf(matrix_nmf, rank = k_chosen, method = "brunet", seed = 123456)
+
+# Extraer las matrices W y H
+# W: Relación entre GO terms y Firmas (Basis matrix)
+# H: Relación entre Firmas y Muestras (Coefficient matrix)
+W <- basis(res_nmf)
+H <- coef(res_nmf)
+     
+     
+###INTERPRETACIÓN DE LOS RESULTADOS
+
+# 1. Mapa de calor de las muestras (Matriz H)
+# Esto mostrará qué firma domina en cada experimento/réplica
+coefmap(res_nmf, tracks = 'basis')
+
+# 2. Mapa de calor de los GO terms (Matriz W)
+# Seleccionamos los GO terms que más contribuyen a cada firma
+basismap(res_nmf, subsetRow = TRUE)
+
+# Obtener los 10 términos GO más importantes para cada firma
+indices_features <- extractFeatures(res_nmf, 10)
+print(indices_features)
+#[[1]]
+# [1]  436  440  451  488  452  418  508 1563 1007    1
+#
+#[[2]]
+# [1]  452  436  488  440  451  508 1563 1007  418    1
+#
+#[[3]]
+# [1]  440  488  452  418  436 1563    1  451 1666  508
+#
+#[[4]]
+# [1]  436  451 1563  440  508 1007  418  452  834  430
+#
+#[[5]]
+# [1]  436  451  440 1563  488  452  508 1007  418  480
+#
+#attr(,"method")
+#[1] 10 10 10 10 10
+
+##De estos 10 términos más importantes quiero añadirles su definición en una tabla. 
+
+# 1. Crear la tabla usando los números para indexar go.sums
+lista_tablas <- lapply(seq_along(indices_features), function(i) {
+  
+  # Extraemos los números de la firma actual
+  posiciones <- indices_features[[i]]
+  
+  # Extraemos las filas de go.sums que corresponden a esas posiciones
+  # Seleccionamos las columnas id, nam y def (ajusta los nombres si varían)
+  df_firma <- go.sums[posiciones, c("id", "nam", "def")]
+  
+  # Añadimos una columna para identificar la Firma
+  df_firma$Firma <- paste0("Firma_", i)
+  
+  # Añadimos el Score de importancia (opcional pero muy útil)
+  # Esto sale de la matriz W (basis) del NMF
+  pesos_W <- basis(res_nmf)
+  df_firma$Importancia_NMF <- pesos_W[posiciones, i]
+  
+  return(df_firma)
+})
+
+# 2. Combinar todo en una única tabla final
+tabla_go_final <- do.call(rbind, lista_tablas)
+
+print(tabla_go_final) #visualización
+
+#summary(tabla_go_final)
+#      id                nam                def               Firma          
+# Length:50          Length:50          Length:50          Length:50         
+# Class :character   Class :character   Class :character   Class :character  
+# Mode  :character   Mode  :character   Mode  :character   Mode  :character  
+                                                                            
+                                                                                                                                                        
+# Importancia_NMF    
+# Min.   : 20503283  
+# 1st Qu.: 51857653  
+# Median : 72638614  
+# Mean   :100567954  
+# 3rd Qu.:113829377  
+# Max.   :434984231  
+
+#str(tabla_go_final)
+#'data.frame':   50 obs. of  5 variables:
+# $ id             : chr  "GO:0005634" "GO:0005654" "GO:0005737" "GO:0005829" ...
+# $ nam            : chr  "nucleus" "nucleoplasm" "cytoplasm" "cytosol" ...
+# $ def            : chr  "A membrane-bounded organelle of eukaryotic cells in which chromosomes are housed and replicated. In most cells,"| __truncated__ "That part of the nuclear content other than the chromosomes or the nucleolus." "The contents of a cell excluding the plasma membrane and nucleus, but including other subcellular structures." "The part of the cytoplasm that does not contain organelles but which does contain other particulate matter, suc"| __truncated__ ...
+# $ Firma          : chr  "Firma_1" "Firma_1" "Firma_1" "Firma_1" ...
+# $ Importancia_NMF: num  3.76e+08 1.83e+08 1.71e+08 1.18e+08 1.15e+08 ...
+
+#Extraer columna "def" y "id" para mejor interpretación. 
+
+     tabla_id_def <- tabla_go_final[, c("id", "def")]
+     head(tabla_resumen)
+
+#Guardar la tabla en el dispositivo
+     write.csv(tabla_id_def, "def_NMF.csv", row.names = FALSE) #lo guarda en el directorio del trabajo
+     getwd() #ver el directorio: 
+     #"/mnt/jr/SCIENTIFICEXT/SCIENTIFIC/work/pamela/RNAseqAI/data/Cj_PFU"
+     
+     
+####INTERPRETACIÓN DE LOS DATOS de NMF####
+
+#La relación principal es que casi todas pertenecen a la categoría 
+#de Componente Celular (Cellular Component), sobre todo en la orgnaización 
+#estructural y compartimentación de la célula eucariota.
+#[EXTENDER INTERPRETACIÓN]
+#[VER POR EXPERIMENTO]
+#[INTERPRETAR LOS PLOTS]
+
+
+
+#############################################################
+########### ANALYSIS SELF-ORGANIZING MAPS, SOM ##############
+#############################################################
+#SOM = técnica supervisada para visualizar relaciones en datos de alta 
+#dimensión (como texto).
+
+
+#Para la visualización y agrupamiento topológico de los datos, se emplearon 
+#Mapas Auto-Organizativos (SOM), un tipo de red neuronal artificial basada en el
+#aprendizaje competitivo. El algoritmo proyecta los perfiles de enriquecimiento
+#funcional de alta dimensionalidad sobre una rejilla bidimensional hexagonal, 
+#preservando la topología de los datos originales (muestras con perfiles biológicos
+#similares se localizan en unidades o celdas adyacentes). La implementación de 
+#la Matriz de Distancia Unificada (U-Matrix) permitió identificar barreras de 
+#disimilitud entre condiciones, visualizando la trayectoria de la progresión 
+#viral desde el estado basal (Wild Type) hasta los niveles máximos de infección. 
+#Este método permitió validar la robustez de las réplicas biológicas y la transición
+#gradual de los estados celulares en función de la dosis infectiva.
+
+
+
+
+# 1. Usamos la matriz numérica que creamos antes
+# Transponemos: ahora las filas serán wt.R1, wt.R2..., X100pfu.R3
+     data_for_som <- t(matrix_nmf)
+
+# 2. Escalar los datos (Z-score normalization)
+# Esto es CRUCIAL para que los GO terms con valores gigantes no dominen el mapa
+     data_scaled <- scale(data_for_som)
+
+# 3. Definir la rejilla (grid), hexagonal para visualizar mejor los datos
+# La rejilla no debe ser mayor al número de muestras (15) 
+      mi_grid <- somgrid(xdim = 3, ydim = 4, topo = "hexagonal", toroidal = FALSE)
+
+# 4. Entrenar el modelo
+# rlen: número de iteraciones (100-500 suele bastar)
+      set.seed(123) # Para que el mapa sea reproducible
+      res_som <- som(data_scaled, grid = mi_grid, rlen = 500, alpha = c(0.05, 0.01))
+
+# Comprobar la convergencia (la curva debe estabilizarse)
+       plot(res_som, type = "changes")
+
+
+# A. Mapa de conteos (¿Cuántas muestras cayeron en cada celda?)
+     plot(res_som, type = "counts", main = "Distribución de Muestras")
+
+# B. Mapa de etiquetas (¿Dónde está cada réplica?)
+# Este es el más importante para ver si los 'pfu' se agrupan    
+     plot(res_som, 
+     type = "mapping", 
+     labels = nombres_limpios, 
+     col = "blue",      # Color del texto
+     cex = 0.8,         # Tamaño de la letra
+     main = "Ubicación de muestras en el SOM por carga viral",
+     bgcol = "lightgrey") # Fondo para resaltar las celdas
+
+### Lo mismo, un heatmap donde la visualización del agrupamiento es mejor: 
+
+# Definimos colores para tus 5 condiciones
+# WT (Gris), 0.1 (Verde), 1 (Amarillo), 10 (Naranja), 100 (Rojo)
+     colores_condicion <- c("grey", "green", "yellow", "orange", "red")
+
+#Asignamos un color a cada una de tus 15 muestras
+     vector_colores <- rep(colores_condicion, each = 3)
+
+#Dibujamos el mapeo pero usando puntos de colores
+      plot(res_som, 
+        type = "mapping", 
+        pchs = 19, 
+        col = vector_colores, 
+        main = "Agrupamiento Biológico (Colores por dosis)")
+
+# Añadimos una leyenda
+      legend("bottomright", 
+          legend = c("WT", "0.1pfu", "1pfu", "10pfu", "100pfu"), 
+          fill = colores_condicion, 
+          cex = 0.7)
+
+
+
+# C. Mapa de 'Codes' o 'Fan Chart'
+# Muestra qué patrones de términos GO definen cada zona del mapa
+# 1. Dibujamos la base: El mapa de distancias (U-Matrix)
+        plot(res_som, 
+           type = "dist.neighbours", 
+           main = "U-Matrix: Distancias Biológicas y Muestras",
+           palette.name = grey.colors,
+           shape = "straight")
+
+# 2. Preparamos los nombres (quitando el .bam para que sea más limpio)
+        nombres_muestras <- gsub(".bam", "", rownames(data_scaled))
+
+# 3. Obtenemos las coordenadas exactas de las celdas en el mapa
+# res_som$unit.classif nos dice en qué celda cayó cada muestra
+        celdas_indices <- res_som$unit.classif
+        posiciones_celdas <- res_som$grid$pts[celdas_indices, ]
+
+# 4. "Escribimos" los nombres sobre el mapa usando la función text()
+# Usamos jitter() para que si hay varias muestras en la misma celda, 
+# los nombres se muevan un poquito y no se tapen entre sí.
+        text(jitter(posiciones_celdas[, 1], amount = 0.2), 
+             jitter(posiciones_celdas[, 2], amount = 0.2), 
+             labels = nombres_muestras, 
+             col = "red3", 
+             cex = 0.7, 
+             font = 2) # font=2 pone la letra en negrita
+
+#D. Coloreal el mapa segun metadatos y fondo de mapa personalizado 
+
+# 1. Definir los metadatos de tus muestras (ajusta el orden si es necesario)
+condiciones <- c("WT", "0.1pfu", "1pfu", "10pfu", "100pfu")
+# Creamos un vector que asigne la condición a cada una de tus 15 muestras
+metadatos_pfu <- data.frame(
+  id = rownames(data_scaled),
+  dosis = rep(condiciones, each = 3)
+)
+
+# 2. Definir una paleta de colores para las dosis (de frío a caliente)
+palette_pfu <- c("azure4", "cadetblue3", "gold1", "orange2", "red3")
+names(palette_pfu) <- condiciones
+
+# 3. Asignar color a cada muestra
+colores_muestras <- palette_pfu[metadatos_pfu$dosis]
+
+# Función para calcular la densidad de distancia en el grid
+calcular_fondo_distancia <- function(SOM) {
+  N <- nrow(SOM$codes[[1]])
+  pairwise_dist <- as.matrix(dist(SOM$codes[[1]]))
+  
+  # Coeficiente de vecindad
+  dist_coef <- function(x) { if (x == 0) return(0) else return(1/(x^4)) }
+  
+  # Distancias geométricas del grid
+  grid_dist <- unit.distances(SOM$grid)
+  dist_weights <- apply(grid_dist, c(1, 2), dist_coef)
+  
+  # Calcular suma de distancias escalada
+  scaled_dist <- colSums(dist_weights * pairwise_dist)
+  return((scaled_dist - min(scaled_dist)) / (max(scaled_dist) - min(scaled_dist)))
+}
+
+# Calculamos los valores del fondo
+valores_fondo <- calcular_fondo_distancia(res_som)
+
+# Configurar el fondo de la ventana (gris oscuro como en el tutorial)
+par(bg = "#333333", mar = c(2,2,4,2))
+
+# Dibujar el SOM
+#combina el fondo de distancias con los puntos coloreados por dosis.
+plot(res_som, 
+     type = "mapping", 
+     # Colores de las etiquetas/puntos
+     col = colores_muestras,
+     pchs = 19, cex = 2,
+     # Fondo de las celdas basado en nuestra función de distancia
+     # Usamos una rampa de color azul/púrpura para el fondo
+     bgcol = hsv(h = 0.6, s = 0.5, v = (1 - valores_fondo * 0.6)),
+     main = "Mapa SOM: Progresión de Infección (Dosis PFU)",
+     col.main = "white")
+
+# Añadir etiquetas cortas encima de los puntos
+text(res_som$grid$pts[res_som$unit.classif, ], 
+     labels = gsub(".bam", "", rownames(data_scaled)), 
+     pos = 3, cex = 0.6, col = "white")
+
+# Leyenda
+legend("bottomleft", legend = condiciones, fill = palette_pfu, 
+       text.col = "white", bty = "n", cex = 0.8)
+
+###interpretación:
+#las zonas más oscuras en el fondo son valles donde 
+#los términos GO son muy similares. 
+#Muestras 100pfu está en un valle más oscuro que WT 
+#eso dice que la infección ha creado un perfil biológico estable nuevo
+
+#Al colorear por dosis, verás visualmente si el SOM ha ordenado tus 
+#muestras de forma lineal (Gris -> Azul -> Amarillo -> Rojo). Si el orden es
+#correcto, has demostrado que la expresión de esos orgánulos (Golgi, Mitocondria)
+#cambia de forma proporcional a la carga viral.
+
+#detección de outliners: ninguna réplica debería caer en la zona del WT 
+
+
+
+###Segunda parte del tutorial de árboles auto-organizativos.
+#colorear el mapa según metadatos (como el género de las obras) y en crear
+#un fondo de mapa personalizado que resalte las distancias.
+
+# 1.Definir los metadatos de las muestras 
+condiciones <- c("WT", "0.1pfu", "1pfu", "10pfu", "100pfu")
+# Creamos un vector que asigne la condición a cada una de tus 15 muestras
+metadatos_pfu <- data.frame(
+  id = rownames(data_scaled),
+  dosis = rep(condiciones, each = 3)
+)
+
+# 2. Definir una paleta de colores para las dosis (de frío a caliente)
+palette_pfu <- c("azure4", "cadetblue3", "gold1", "orange2", "red3")
+names(palette_pfu) <- condiciones
+
+# 3. Asignar color a cada muestra
+colores_muestras <- palette_pfu[metadatos_pfu$dosis]
+
+
+
+# 4. Función para calcular la densidad de distancia en el grid. Calcula las distancias 
+#de forma más suave que U-Matrix estándar.
+calcular_fondo_distancia <- function(SOM) {
+  N <- nrow(SOM$codes[[1]])
+  pairwise_dist <- as.matrix(dist(SOM$codes[[1]]))
+  
+  # Coeficiente de vecindad
+  dist_coef <- function(x) { if (x == 0) return(0) else return(1/(x^4)) }
+  
+  # Distancias geométricas del grid
+  grid_dist <- unit.distances(SOM$grid)
+  dist_weights <- apply(grid_dist, c(1, 2), dist_coef)
+  
+  # Calcular suma de distancias escalada
+  scaled_dist <- colSums(dist_weights * pairwise_dist)
+  return((scaled_dist - min(scaled_dist)) / (max(scaled_dist) - min(scaled_dist)))
+}
+
+# 5. Calculamos los valores del fondo
+valores_fondo <- calcular_fondo_distancia(res_som)
+
+# 6. Configurar el fondo de la ventana (gris oscuro como en el tutorial)
+par(bg = "#333333", mar = c(2,2,4,2))
+
+# 7. Dibujar el SOM
+plot(res_som, 
+     type = "mapping", 
+     # Colores de las etiquetas/puntos
+     col = colores_muestras,
+     pchs = 19, cex = 2,
+     # Fondo de las celdas basado en nuestra función de distancia
+     # Usamos una rampa de color azul/púrpura para el fondo
+     bgcol = hsv(h = 0.6, s = 0.5, v = (1 - valores_fondo * 0.6)),
+     main = "Mapa SOM: Progresión de Infección (Dosis PFU)",
+     col.main = "white")
+
+# Añadir etiquetas cortas encima de los puntos
+text(res_som$grid$pts[res_som$unit.classif, ], 
+     labels = gsub(".bam", "", rownames(data_scaled)), 
+     pos = 3, cex = 0.6, col = "white")
+
+# Leyenda
+legend("bottomleft", legend = condiciones, fill = palette_pfu, 
+       text.col = "white", bty = "n", cex = 0.8)
+
+
+
+
+###############################################
+###############################################
+######## SUPPORT VECTOR MACHINE (SVM)##########
+###############################################
+###############################################
+
+#Algoritmo de aprendizaje supervisado robusto y versátil del Machine Learning 
+#El SVM es un algoritmo utilizado principalmente para problemas de 
+#clasificación y regresión. Su objetivo principal es encontrar un hiperplano 
+#en un espacio N-dimensional (donde N es el número de características) que 
+#separe claramente los puntos de datos de diferentes clases.
+
+#Conceptos Clave del Algoritmo
+#Hiperplano (Hyperplane): Es el límite de decisión que separa las clases. 
+#En un espacio de 2D es una línea, en 3D es un plano, y en dimensiones 
+#superiores se denomina hiperplano.
+
+#Vectores de Soporte (Support Vectors): Son los puntos de datos que están más 
+#cerca del hiperplano y que influyen en su posición y orientación. Si estos 
+#puntos cambian, el hiperplano cambia.
+
+#Margen (Margin): Es la distancia entre el hiperplano y los vectores de 
+#soporte más cercanos. El objetivo de SVM es maximizar este margen para que el 
+#clasificador sea lo más robusto posible (Margen Máximo).
+
+#Tipos de SVM
+#Linear SVM: Se utiliza cuando los datos son linealmente separables (se pueden 
+#separar con una línea recta).
+
+#Non-Linear SVM: Se utiliza cuando los datos no se pueden separar linealmente. 
+#Para esto, el algoritmo utiliza el Kernel Trick.
+
+
+
+
+
+
+
+###############################################
+###############################################
+############## RANDOM FOREST ##################
+###############################################
+###############################################
+
+
+#El método de Random Forest es un algoritmo de aprendizaje supervisado basado #en técnicas de Ensemble Learning que combina múltiples árboles de decisión #para generar una predicción única y robusta. A diferencia de un árbol de #decisión individual, que tiende al sobreajuste (overfitting), Random Forest #introduce dos niveles de aleatoriedad: la selección de subconjuntos de datos #mediante bootstrapping (bagging) y la selección aleatoria de un subconjunto #de variables en cada nodo. En este estudio, el algoritmo se utilizó para #clasificar muestras según su carga viral, permitiendo además identificar la #Importancia de las Variables mediante métricas de pureza de nodos (Gini) o #permutación, destacando así los términos de Ontología Génica (GO) con mayor #valor predictivo
+
+# 1. Preparación de los datos
+# data_scaled tiene términos GO (columnas) 
+df_rf <- as.data.frame(data_scaled)
+
+# IMPORTANTE: R no tolera espacios ni paréntesis en fórmulas. Limpiamos los nombres:
+nombres_originales <- colnames(df_rf) # Guardamos los nombres reales para #después
+colnames(df_rf) <- make.names(colnames(df_rf))
+
+# 3. Añadir la variable objetivo (Dosis de PFU) como Factor
+# (Ajusta el orden según tus muestras reales)
+condiciones <- c("WT", "pfu0.1", "pfu1", "pfu10", "pfu100")
+df_rf$pfu <- factor(rep(condiciones, each = 3), levels = condiciones)
+
+# 4. Entrenamiento del modelo con RANGER
+# Usamos 'importance = permutation' para máxima precisión científica
+cat("Entrenando el bosque aleatorio...\n")
+set.seed(123) # Para que siempre te salga el mismo resultado
+modelo_ranger <- ranger(
+    dependent.variable.name = "pfu", 
+    data = df_rf, 
+    importance = 'permutation', 
+    scale.permutation.importance = TRUE,
+    num.trees = 500
+)
+
+# 5. Extracción y Limpieza de la Importancia
+importancia_valores <- modelo_ranger$variable.importance
+df_importancia <- data.frame(
+    ID_Limpio = names(importancia_valores),
+    Importancia = importancia_valores
+)
+
+# Recuperamos los nombres reales de los términos GO para que el gráfico sea legible
+# (Hacemos un match entre los nombres limpios y los originales)
+mapeo_nombres <- data.frame(ID_Limpio = make.names(nombres_originales), NombreReal = nombres_originales)
+df_importancia <- merge(df_importancia, mapeo_nombres, by = "ID_Limpio")
+
+# 6. Filtrado: Los 10 términos GO más influyentes (Top Predictores)
+df_top <- df_importancia[order(df_importancia$Importancia, decreasing = TRUE), ][1:10, ]
+
+# 7. Visualización Profesional
+ggplot(df_top, aes(x = reorder(NombreReal, Importancia), y = Importancia)) +
+    geom_bar(stat = "identity", fill = "steelblue") +
+    coord_flip() + # Para que los nombres largos de GO se lean bien
+    theme_minimal() +
+    labs(
+        title = "Top 10 Biomarcadores (Términos GO)",
+        subtitle = "Importancia por Permutación (Random Forest)",
+        x = "Término Gene Ontology",
+        y = "Importancia (Z-score)"
+    )
+
+# 8. Guardar los resultados en un archivo
+write.table(df_importancia[order(df_importancia$Importancia, decreasing = TRUE), ], 
+            "Resultados_RandomForest_GO.txt", sep="\t", row.names=F)
+
+cat("Análisis finalizado. Se ha creado el archivo 'Resultados_RandomForest_GO.txt'\n")
+
+#############Comparar si los 10 términos de GO de Random Forest son los mismo #que en la firma de NMF = validación cruzada por diferentes métodos
+
+# 1. Extraer los términos de la firma principal de tu NMF
+# Suponiendo que tu objeto NMF se llama 'res_nmf' y queremos la Firma 1
+coef_nmf <- basis(res_nmf)
+# Tomamos los 10 términos con más peso en la Firma 1
+top_nmf <- rownames(coef_nmf)[order(coef_nmf[,1], decreasing = TRUE)][1:10]
+
+# 2. Extraer los 10 términos más importantes de Random Forest
+top_rf <- df_top$NombreReal
+
+# 3. Encontrar la intersección (términos que aparecen en ambos)
+coincidencias <- intersect(top_nmf, top_rf)
+
+# 4. Mostrar resultados
+cat("Términos identificados por NMF:", length(top_nmf), "\n")
+cat("Términos identificados por Random Forest:", length(top_rf), "\n")
+cat("BIO-MARCADORES VALIDADOS (Coincidencias):", length(coincidencias), "\n")
+print(coincidencias)
+##Character(0) 
+#El NMF te dice qué componentes celulares están trabajando juntos como un #módulo (co-expresión). El Random Forest te dice cuáles de esos componentes #son los mejores para predecir la carga viral. Si coinciden, has encontrado #el "motor" de la infección.
+
+
+
+
+################################################################
+################################################################
+############## REGULARIZED RANDOM FOREST (RRF)##################
+################################################################
+################################################################
+
+#El Regularized Random Forest (RRF) es una evolución del Random Forest #diseñada específicamente para cuando tienes muchas variables (como tus #cientos de términos GO) que están muy correlacionadas entre sí.
+
+#A diferencia del RF normal, el RRF penaliza a las variables que no aportan #información nueva, seleccionando solo un "equipo de élite" de biomarcadores. #Esto es perfecto para tu proyecto porque limpia el "ruido".
+
+
+# Preparación del dataset (data_scaled)
+df_rrf <- as.data.frame(data_scaled)
+colnames(df_rf) <- make.names(colnames(df_rf)) # Evitar errores de caracteres
+
+# Añadir pfu como factor (importante para clasificación)
+df_rrf$pfu <- factor(rep(c("WT", "pfu0.1", "pfu1", "pfu10", "pfu100"), each = 3))
+
+#Función imp_rrf adaptada
+
+imp_rrf_adaptada <- function (formula, data, verbose=T) {
+    if (verbose) cat("Construyendo modelo RRF (Regularized Random Forest)...\n")
+
+    # Establecemos una semilla para reproducibilidad
+    set.seed(123)
+
+    # El método 'RRF' en caret utiliza regularización para seleccionar variables
+    # Este paso puede tardar un poco más que el RF normal
+    rrfMod <- caret::train(formula, 
+                           data = data, 
+                           method = "RRF",
+                           importance = TRUE) 
+
+    if (verbose) cat("Calculando importancia de variables...\n")
+    rrfImp <- caret::varImp(rrfMod, scale=FALSE)
+
+    # Visualización rápida en consola
+    if (verbose) plot(rrfImp, top = 20, main='RRF Variable Importance (Top 20)')
+
+    return(rrfImp$importance)
+}
+
+# Definir fórmula
+mi_formula <- pfu ~ .
+
+# Ejecutar
+importancia_rrf <- imp_rrf_adaptada(mi_formula, data = df_rrf)
+
+# Limpiar y ordenar resultados
+df_final_rrf <- data.frame(
+    Termino_GO = rownames(importancia_rrf),
+    Importancia = importancia_rrf$Overall
+)
+df_final_rrf <- df_final_rrf[order(df_final_rrf$Importancia, decreasing = TRUE), ]
+
+# Guardar en archivo 
+dir.create("impgenes", showWarnings = FALSE) # Crear carpeta si no existe
+write.table(df_final_rrf, 'impgenes/imp_rrf_tc.txt', sep='\t', row.names=F)
+
+# Mostrar el Top 10
+print(head(df_final_rrf, 10))
+
+#----
+# 1. Identificar cuál es la columna de importancia
+# Buscamos la columna que suele ser la medida global (la última o la que tiene 'Gini' o 'Accuracy')
+col_idx <- ncol(importancia_rrf) 
+nombre_col <- colnames(importancia_rrf)[col_idx]
+
+cat("Usando la métrica de importancia:", nombre_col, "\n")
+
+# 2. Crear el dataframe de forma segura
+df_final_rrf <- data.frame(
+    Termino_GO = rownames(importancia_rrf),
+    Importancia = importancia_rrf[, col_idx] # Accedemos por posición, no por nombre
+)
+
+# 3. Ordenar y limpiar
+df_final_rrf <- df_final_rrf[order(df_final_rrf$Importancia, decreasing = TRUE), ]
+
+# 4. Ver el Top 10
+print(head(df_final_rrf, 10))
+
+## print(head(df_final_rrf, 10))
+#       Termino_GO Importancia
+#1355 `GO:0032012`    4.465256
+#1238 `GO:0030229`    4.264949
+#1463 `GO:0034976`    4.065578
+#16   `GO:0000123`    4.007086
+#1982 `GO:0080048`    3.872641
+#1295 `GO:0030968`    3.795167
+#280  `GO:0004556`    3.442142
+#1390 `GO:0032526`    3.287661
+#819  `GO:0008233`    3.207938
+#329  `GO:0004823`    3.161023
+
+
+##interpretación de resultados: 
+#ID GO	Nombre del Término	Significado Biológico en Infección
+
+#GO:0032012	Regulation of mRNA export from nucleus	El "bloqueo" viral. Muchos virus detienen la salida del mRNA de la propia célula para que esta no pueda fabricar defensas (interferón) y solo se dedique a replicar el genoma viral.
+
+#GO:0030229	Megalocyte differentiation	Respuesta de estrés/crecimiento. Aunque suena a sangre, en modelos de infección celular suele indicar cambios en el ciclo celular o en el tamaño de la célula debido al estrés masivo por la carga viral.
+
+#GO:0034976	Response to endoplasmic reticulum stress	La "fábrica" desbordada. Los virus usan el Retículo Endoplasmático (RE) para plegar sus proteínas. Cuando hay mucha carga viral, el RE se estresa y activa esta respuesta (UPR). Es un marcador clásico de alta replicación.
+
+
+#"El modelo de Regularized Random Forest (RRF) identificó tres determinantes #críticos de la carga viral. El predictor más robusto fue GO:0032012 #(regulación de la exportación de mRNA), lo que sugiere una interferencia en #el tráfico núcleo-citoplasmático, un mecanismo común de evasión inmune #viral. Asimismo, la alta relevancia de GO:0034976 vincula directamente la #dosis infectiva con el estrés del Retículo Endoplasmático, confirmando que #la maquinaria de síntesis proteica es el principal foco de alteración #funcional durante la infección por el virus IBDV."
+
+
+
+
+
+################################################################
+################################################################
+###################### VITA ####################################
+################################################################
+################################################################
+
+
+#El método VITA (Variable Importance Testing Algorithm) es una de las #técnicas más rigurosas en bioinformática para validar qué genes o términos #GO son realmente importantes. Su objetivo principal es separar la señal #biológica verdadera del ruido estadístico.
+
+#El método VITA (Variable Importance Testing Algorithm) es un marco estadístico diseñado para validar la relevancia de las variables en modelos de Random Forest, filtrando el ruido mediante el enfoque de permutación de Altmann. Su funcionamiento consiste en contrastar la importancia observada de cada término (como tus términos GO) contra una "distribución nula" generada al barajar repetidamente las etiquetas de las muestras; de este modo, el método identifica qué variables tienen una importancia genuina y cuáles han puntuado alto por puro azar. Al calcular un p-valor para cada variable, VITA permite seleccionar únicamente aquellos biomarcadores que poseen una significancia estadística real, garantizando que el "Top" de resultados finales sea robusto y biológicamente confiable.
+
+
+
+# Limpiamos nombres para que randomForest no de error con caracteres especiales
+#df_vita <- as.data.frame(data_scaled)
+#colnames(df_vita) <- make.names(colnames(df_vita))
+#df_vita$pfu <- factor(rep(c("WT", "pfu0.1", "pfu1", "pfu10", "pfu100"), each = 3))
+
+# Adaptación de la función imp_vita
+# corrección para que maneje bien los nombres de las columnas
+#imp_vita_final <- function(formula, data, S_permutaciones = 10) {
+#    cat("Pasando test de Altmann (PIMP)... Esto puede tardar unos minutos.\n")
+    
+    # Entrenamos el modelo base
+#    regressor <- randomForest(formula, data = data, importance = TRUE)
+    
+    # Variable dependiente (pfu)
+#    y_name <- all.vars(formula)[1]
+#    y_data <- data[[y_name]]
+#    x_data <- data[, setdiff(names(data), y_name)]
+    
+    # Ejecutamos PIMP (Permutation Importance)
+    # S = 10 según tu script original, sube a 50 para más precisión si tienes tiempo
+#    pimp_out <- PIMP(x_data, y_data, regressor, S = S_permutaciones, parallel = TRUE)
+    
+    # El objeto pimp_out contiene la importancia corregida
+ #   return(pimp_out)
+#}
+
+# 3. Ejecución
+# Usamos S=10 como en tu código original
+#resultado_pimp <- imp_vita_final(pfu ~ ., data = df_vita, S_permutaciones = 10)
+
+# 4. Test de significancia y Filtrado (Pareto 80/20)
+# Esto calcula cuáles son estadísticamente diferentes del azar
+#pimp_test <- PIMP_test(resultado_pimp, para = FALSE)
+
+# Creamos el dataframe final
+#etc.i.vita <- data.frame(
+#    ID_Limpio = names(pimp_test$VarImp),
+#    importance = pimp_test$VarImp,
+#    p_value = pimp_test$pvalue
+#)
+
+# 5. Aplicamos tus filtros del script: importancia > 0 y cuantil 0.8
+#etc.i.vita <- subset(etc.i.vita, importance > 0)
+#umbral_pareto <- quantile(etc.i.vita$importance, 0.8)
+#etc.i.most_signif <- subset(etc.i.vita, importance > umbral_pareto)
+
+# 6. Recuperar nombres reales y guardar
+# (Usando el mapeo de nombres que creamos anteriormente)
+#mapeo_nombres <- data.frame(ID_Limpio = make.names(colnames(data_scaled)), 
+ #                           NombreReal = colnames(data_scaled))
+
+#etc.i.most_signif <- merge(etc.i.most_signif, mapeo_nombres, by = "ID_Limpio")
+#etc.i.most_signif <- etc.i.most_signif[order(etc.i.most_signif$importance, decreasing = TRUE), ]
+
+# Guardar resultados
+#dir.create("impgenes", showWarnings = FALSE)
+#write.table(etc.i.most_signif, 'impgenes/imp_vita_most_signif_tc.txt', sep='\t', row.names=F)
+
+# Mostrar el Top 10 validado
+#print(head(etc.i.most_signif, 10))
+
+
+
+
+################################################################
+################################################################
+############# LDA(Latent Dirichlet Allocation)  ################ NO  
+################################################################ FUNCIONA
+################################################################
+
+
+#El LDA (Latent Dirichlet Allocation) es un modelo estadístico y de #inteligencia artificial no supervisada que descubre "temas ocultos" en una #colección de textos, asumiendo que cada documento (como tus descripciones #GO) es una mezcla de diversos temas y que cada tema es una distribución de #palabras. El algoritmo analiza la co-ocurrencia de términos para agrupar #palabras relacionadas semánticamente en categorías biológicas transversales, #permitiéndote sintetizar miles de anotaciones técnicas en unos pocos #conceptos narrativos claros, como "estrés del retículo" o "transporte #viral", basándose en la probabilidad de que ciertas palabras clave aparezcan #juntas.
+
+
+# 2. Preparar los datos para el modelo
+# Creamos una matriz donde cada GO ID es un "documento"
+go_counts <- go.sums %>%
+  select(id, nam) %>%
+  # Tokenizamos la variable 'nam' para extraer palabras clave
+  unnest_tokens(word, nam) %>%
+  # Limpiamos palabras comunes y genéricas de la nomenclatura GO
+  anti_join(stop_words, by = "word") %>%
+  filter(!word %in% c("regulation", "process", "cell", "activity", "protein")) %>%
+  count(id, word, sort = TRUE)
+
+# Convertir a Document-Term Matrix (DTM)
+dtm_go <- go_counts %>%
+  cast_dtm(id, word, n)
+
+# 3. Entrenar el modelo LDA
+# Ajustamos k (número de tópicos). 6 es un buen punto de partida para 2109 términos.
+k_val <- 6
+lda_results <- LDA(dtm_go, k = k_val, control = list(seed = 1234))
+
+# 4. Extraer los términos (palabras) más importantes por tópico (Beta)
+topics_beta <- tidy(lda_results, matrix = "beta")
+
+# 5. Visualización Interpretable
+# Seleccionamos las 10 palabras más probables por cada tópico
+top_terms <- topics_beta %>%
+  group_by(topic) %>%
+  slice_max(beta, n = 10) %>% 
+  ungroup() %>%
+  arrange(topic, -beta)
+
+# Gráfico de Tópicos
+ggplot(top_terms, aes(beta, reorder_within(term, beta, topic), fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  scale_y_reordered() +
+  labs(
+    title = "Tópicos Latentes en las Anotaciones GO (Variable 'nam')",
+    subtitle = "Cada panel agrupa conceptos biológicos que co-ocurren en tus datos",
+    x = "Probabilidad del término en el tópico (Beta)",
+    y = NULL
+  ) +
+  theme_minimal() +
+  theme(strip.text = element_text(face = "bold", size = 12))
+
+
+################################################################
+################################################################
+###################### TF-IDF ####################################
+################################################################
+################################################################
+
+#mira el significado biológico de las descripciones (def) y nombres (nam) de tus términos GO.
+#El objetivo es identificar qué palabras son "pesadas" o distintivas en tu set de datos, ayudándote a definir la "firma temática" de tu experimento (por ejemplo, si aparecen muchas palabras relacionadas con "autofagia" o "respuesta viral").
+
+
+# 2. Procesar los datos
+# Vamos a tratar cada 'id' como un documento y su 'def' como el contenido
+go_tfidf_analysis <- go.sums %>%
+  select(id, def) %>%
+  # Tokenizamos la definición: separamos por palabras
+  unnest_tokens(word, def) %>%
+  # Limpieza de "stop words" y palabras genéricas de GO que no aportan
+  anti_join(stop_words, by = "word") %>%
+  filter(!word %in% c("process", "cell", "protein", "activity", "results")) %>%
+  # Contamos palabras por ID
+  count(id, word, sort = TRUE) %>%
+  # Calculamos el TF-IDF basado en el ID
+  bind_tf_idf(word, id, n)
+
+# 3. Identificar los términos más importantes
+# Agrupamos por ID para obtener la relevancia semántica total de cada término GO
+go_importance <- go_tfidf_analysis %>%
+  group_by(id) %>%
+  summarise(relevance_score = sum(tf_idf)) %>%
+  arrange(desc(relevance_score)) %>%
+  # Unimos de vuelta con la definición original para el gráfico
+  left_join(unique(go.sums[, c("id", "def")]), by = "id") %>%
+  # Tomamos los 15 más importantes para que el plot sea legible
+  slice_max(relevance_score, n = 15)
+
+# 4. Crear el Plot Interpretable
+ggplot(go_importance, aes(x = reorder(def, relevance_score), y = relevance_score)) +
+  geom_col(aes(fill = relevance_score), show.legend = FALSE) +
+  # Función para que las definiciones largas se dividan en varias líneas
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 50)) +
+  coord_flip() +
+  scale_fill_gradient(low = "lightblue", high = "darkblue") +
+  labs(
+    title = "Top 15 Rutas GO más Representativas",
+    subtitle = "Ranking basado en importancia semántica (TF-IDF)",
+    x = "Definición de la Ruta (Análisis de Texto)",
+    y = "Puntaje de Relevancia"
+  ) +
+  theme_minimal()
+  
+  
+#Precisión por ID: Al agrupar por id, el modelo TF-IDF entiende que cada #código de Gene Ontology es una unidad de información distinta, evitando #confusiones si dos términos diferentes usaran palabras similares.
+
+#Legibilidad Humana: Al usar str_wrap y mapear el eje X a def, el gráfico se #explica solo. Cualquiera que lo vea entenderá que la ruta importante es "Any #process that results in a change..." en lugar de tener que buscar qué #significa "GO:000XXXX".
+
+#Filtrado de Ruido: He añadido un filtro manual (filter(!word %in% c(...))) #para quitar palabras como "process" o "activity". En Bioinformática, estas #palabras aparecen en casi todas las definiciones GO y suelen "inflar" el #puntaje sin aportar valor biológico real. 
+  
+#Como tus datos provienen de una matriz de conteos, este análisis de texto te #dice qué rutas son las más específicas en tu catálogo. Si quieres que el #gráfico resalte solo las rutas que además tienen muchos conteos en tus #muestras de infección (0.1pfu), podríamos multiplicar el relevance_score por #el conteo medio de esa muestra.
+
+
+
+#######MISMO MÉTODO USANDO LA VARIABLE "nam" EN LUGAR DE LA "def" PARA MEJOR VISUALIZACIÓN DE LOS DATOS
+
+# 2. Procesamiento de Texto usando 'nam'
+# Tratamos cada ID como el documento y su nombre como el contenido a analizar
+go_tfidf_nam <- go.sums %>%
+  select(id, nam) %>%
+  # Tokenizamos los nombres de las rutas
+  unnest_tokens(word, nam) %>%
+  # Eliminamos palabras comunes (stop words)
+  anti_join(stop_words, by = "word") %>%
+  # Filtro opcional: quitamos palabras que se repiten mucho en GO y no dicen mucho
+  filter(!word %in% c("regulation", "process", "negative", "positive", "cell")) %>%
+  # Contamos palabras por ID
+  count(id, word, sort = TRUE) %>%
+  # Calculamos el TF-IDF
+  bind_tf_idf(word, id, n)
+
+# 3. Calcular relevancia por ID y recuperar el nombre completo para el plot
+go_plot_data <- go_tfidf_nam %>%
+  group_by(id) %>%
+  summarise(relevance_score = sum(tf_idf)) %>%
+  arrange(desc(relevance_score)) %>%
+  # Recuperamos el nombre original (nam) para que el gráfico sea legible
+  left_join(unique(go.sums[, c("id", "nam")]), by = "id") %>%
+  # Seleccionamos los top 20 para una mejor visualización
+  slice_max(relevance_score, n = 20)
+
+# 4. Creación del Gráfico
+ggplot(go_plot_data, aes(x = reorder(nam, relevance_score), y = relevance_score)) +
+  geom_col(aes(fill = relevance_score)) +
+  coord_flip() +
+  scale_fill_gradient(low = "#85C1E9", high = "#1B4F72") + # Paleta de azules
+  labs(
+    title = "Top 20 Términos GO más Significativos",
+    subtitle = "Análisis TF-IDF basado en los nombres de las rutas (Variable 'nam')",
+    x = "Nombre del Término GO",
+    y = "Puntaje de Relevancia Semántica"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 9),
+    legend.position = "none"
+  )
+
+#Destaca: Z disc, vasodilatación, T cell constimulation, sulfation
+#hay que interprestar resultados
+
+
+
+
+################################################################
+################################################################ NECESITO 
+################# WORD EMBEDDINGS ##############################  PYTHON
+################################################################
+################################################################
+
+#Este es el nivel más avanzado de análisis de texto en Bioinformática. A diferencia de TF-IDF o LDA (que cuentan palabras), los Word Embeddings convierten el lenguaje biológico en vectores numéricos en un espacio multidimensional.
+
+# 2. Extraer los nombres únicos (evitar procesar 2109 si hay duplicados)
+go_names <- go.sums %>% 
+  select(id, nam) %>% 
+  distinct()
+
+# 3. Generar Embeddings (Este paso descarga un modelo ligero de lenguaje)
+# Usaremos 'distilbert-base-uncased' por velocidad, pero puedes usar 'dmis-lab/biobert-v1.1'
+embeddings <- textEmbed(
+  texts = go_names$nam,
+  model = "distilbert-base-uncased", # Modelo base (puedes cambiar a BioBERT)
+  layers = -2 # Capas profundas para captar semántica
+)
+
+# 4. Reducción de dimensionalidad (UMAP)
+# Como los embeddings tienen muchas dimensiones (ej. 768), los bajamos a 2 para graficar
+umap_results <- umap(embeddings$x, n_neighbors = 15, min_dist = 0.1)
+
+# Preparar dataframe para el plot
+plot_data <- data.frame(
+  id = go_names$id,
+  nam = go_names$nam,
+  x = umap_results[,1],
+  y = umap_results[,2]
+)
+
+# 5. Visualización: Mapa Semántico de Rutas GO
+# Resaltamos los nombres más importantes para que sea legible
+ggplot(plot_data, aes(x = x, y = y, label = nam)) +
+  geom_point(color = "steelblue", alpha = 0.6) +
+  # Usamos geom_text_repel para que los nombres no se solapen (requiere ggrepel)
+  ggrepel::geom_text_repel(
+    data = subset(plot_data, abs(x) > quantile(abs(x), 0.95)), # Solo los extremos
+    size = 3,
+    max.overlaps = 10
+  ) +
+  labs(
+    title = "Mapa Semántico de Rutas GO (Word Embeddings)",
+    subtitle = "Agrupación basada en significado biológico profundo (Contextual NLP)",
+    x = "UMAP Dimensión 1",
+    y = "UMAP Dimensión 2"
+  ) +
+  theme_minimal()
+
+
+###NECESITO PYTHON PARA EJECUTAR ESTE MÉTODO
+
+
+
+################################################################
+################################################################
+#########CLUSTERING JERARQUICO NATIVO###########################
+################################################################
+################################################################
+
+#técnica de Similitud de Coseno sobre una matriz de términos (basada en el método TF-IDF). Esto agrupa los términos GO comparando cuántas palabras biológicas comparten en sus nombres
+
+
+# 1. Cargar librerías
+library(tidyverse)
+library(tidytext)
+library(proxy)    # Para calcular distancias de similitud
+library(pheatmap) # Para el gráfico final
+
+# 2. Crear una matriz de "palabras por ID"
+# Esto convierte tus 2109 nombres en una matriz numérica que R entiende
+go_matrix_data <- go.sums %>%
+  select(id, nam) %>%
+  distinct() %>%
+  unnest_tokens(word, nam) %>%
+  anti_join(stop_words) %>%
+  # Contamos palabras por cada ID
+  count(id, word) %>%
+  # Convertimos a formato de matriz ancha (sparse matrix)
+  cast_sparse(id, word, n)
+
+# 3. Calcular la Distancia de Coseno
+# En lugar de embeddings, medimos qué tanto se solapan las palabras de los nombres
+# convertimos a matriz normal para el cálculo
+dist_matrix <- proxy::dist(as.matrix(go_matrix_data), method = "cosine")
+
+# 4. Clustering Jerárquico
+# Usamos el método de Ward para crear grupos compactos
+hc_model <- hclust(dist_matrix, method = "ward.D2")
+
+# 5. Cortar el árbol en Clusters (ejemplo: 12 grupos)
+num_clusters <- 12
+clusters <- cutree(hc_model, k = num_clusters)
+
+# 6. Unir los resultados con tus datos originales
+# Creamos un dataframe con el ID y su cluster correspondiente
+df_clusters <- data.frame(
+  id = rownames(as.matrix(go_matrix_data)), 
+  cluster_ia = as.factor(clusters)
+)
+
+go_resultados_final <- go.sums %>%
+  left_join(df_clusters, by = "id")
+
+# 7. Visualización: ¿Qué hay en cada cluster?
+# Vamos a ver los nombres de los primeros 5 términos del Cluster 1
+print("Muestra del Cluster 1:")
+go_resultados_final %>%
+  filter(cluster_ia == 1) %>%
+  select(nam) %>%
+  distinct() %>%
+  head(10)
+
+#                                                                       nam
+#1                                trans-hexaprenyltranstransferase activity
+#2                                             mannosyltransferase activity
+#3                                                   fatty-acyl-CoA binding
+#4  regulation of cyclin-dependent protein serine/threonine kinase activity
+#5                                           3'-5'-exoribonuclease activity
+#6                               inositol heptakisphosphate kinase activity
+#7                                       G protein-coupled receptor binding
+#8                                                ATPase activator activity
+#9                                          prenylcysteine oxidase activity
+#10                                         aminoacyl-tRNA editing activity
+
+#y faltan los otros 11 clusters
+
+
+##TABLA DE IDENTIDAD BIOLÓGICA DE CLUSTERS##
+#aplicar la lógica de TF-IDF pero esta vez agrupada por Cluster.
+
+# 1. Identificar palabras clave por cada Cluster
+cluster_keywords <- go_resultados_final %>%
+  select(cluster_ia, nam) %>%
+  distinct() %>%
+  unnest_tokens(word, nam) %>%
+  anti_join(stop_words, by = "word") %>%
+  # Quitamos palabras demasiado genéricas en GO
+  filter(!word %in% c("regulation", "process", "cell", "activity")) %>%
+  # Contamos palabras dentro de cada cluster
+  count(cluster_ia, word, sort = TRUE) %>%
+  # Aplicamos TF-IDF para ver qué palabras definen a CADA cluster
+  bind_tf_idf(word, cluster_ia, n) %>%
+  group_by(cluster_ia) %>%
+  slice_max(tf_idf, n = 5) %>% # Tomamos las 5 palabras más descriptivas
+  summarise(keywords = paste(word, collapse = ", "))
+
+# 2. Ver el resumen en consola
+print(cluster_keywords)
+
+# 3. Visualización Estética: Las "Etiquetas" de los Clusters
+ggraph(graph, layout = "stress") +
+  # Dibujar las conexiones (aristas) - el grosor depende de la similitud
+  geom_edge_link(aes(width = weight), alpha = 0.2, color = "grey50", show.legend = FALSE) +
+  
+  # Dibujar los nodos - el tamaño depende de cuántos términos GO tiene el cluster
+  geom_node_point(aes(size = size, color = cluster_id), show.legend = FALSE) +
+  
+  # Añadir las etiquetas con los 'nam' (keywords) de cada cluster
+  # Usamos str_wrap para que los nombres largos se dividan en varias líneas
+  geom_node_label(aes(label = str_wrap(label, width = 20)), 
+                  repel = TRUE, 
+                  size = 3, 
+                  alpha = 0.8,
+                  label.padding = unit(0.2, "lines"),
+                  box.padding = unit(0.5, "lines"),
+                  point.padding = unit(0.5, "lines"),
+                  fontface = "bold") +
+  
+  # Estética y títulos
+  scale_size_continuous(range = c(5, 15)) +
+  scale_color_brewer(palette = "Set3") +
+  labs(
+    title = "Mapa de Conectividad Funcional",
+    subtitle = "Los nodos representan módulos biológicos; las conexiones indican solapamiento semántico",
+    caption = "El tamaño del nodo es proporcional al número de términos GO en el cluster"
+  ) +
+  theme_graph() +
+  theme(plot.title = element_text(size = 16, face = "bold"))
+
+
+
+
+################################################################
+################################################################
+#########ANALISIS DE SENTIMIENTO BIOLOGICO PERSONALIZADO #######
+################################################################
+################################################################
+
+#El Análisis de Sentimiento Biológico es una técnica de minería de texto que #clasifica tus rutas GO según su "propósito" funcional mediante el uso de un #diccionario de palabras clave predefinido. En lugar de medir emociones, este #método asigna una puntuación de polaridad a cada término basándose en #conceptos contrapuestos, como Respuesta Defensiva (inflamación, apoptosis, #estrés) frente a Homeostasis (metabolismo, biosíntesis, ciclo celular). Al #cruzar esta puntuación con tus clusters, puedes determinar cuantitativamente #si un grupo funcional está orientado a la lucha contra la infección o al #mantenimiento celular, permitiéndote narrar tus resultados de RNA-seq no #solo en términos de genes, sino de estrategias biológicas globales adoptadas #por la célula ante el estímulo viral.
+
+# 1. Ejecutar el análisis de sentimiento con la corrección de 'drop = FALSE'
+go_sentiment <- go.sums %>%
+  left_join(df_clusters, by = "id") %>% 
+  select(id, nam, cluster_ia) %>%
+  distinct() %>%
+  # drop = FALSE mantiene la columna 'nam' después de separar las palabras
+  unnest_tokens(word, nam, drop = FALSE) %>% 
+  inner_join(bio_lexicon, by = "word") %>%
+  count(id, nam, cluster_ia, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>%
+  # Aseguramos que existan ambas columnas para que la resta no falle
+  mutate(
+    defensive = if("defensive" %in% names(.)) defensive else 0,
+    homeostasis = if("homeostasis" %in% names(.)) homeostasis else 0,
+    polarity_score = defensive - homeostasis
+  )
+
+# 2. Generar el gráfico de cajas (Boxplot)
+library(ggplot2)
+ggplot(go_sentiment, aes(x = cluster_ia, y = polarity_score, fill = cluster_ia)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.3, size = 1) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red", size = 1) +
+  labs(
+    title = "Perfil de Sentimiento Biológico por Cluster",
+    subtitle = "Valores > 0: Defensa/Estrés | Valores < 0: Homeostasis/Metabolismo",
+    x = "Cluster (Agrupamiento Semántico)",
+    y = "Índice de Polaridad"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+  
+  
+##IMPRIMIR LOS 12 CLUSTERS
+
+# Bucle para imprimir una muestra de cada cluster
+for (i in 1:12) {
+  cat("\n--- CLUSTER", i, "---\n")
+  terminos <- go_resultados_final %>%
+    filter(cluster_ia == i) %>%
+    select(nam) %>%
+    distinct() %>%
+    head(10) # Solo los 10 primeros para no saturar la pantalla
+  
+  print(terminos)
+}
+
+#
+
+#--- CLUSTER 1 ---
+#                                                                       nam
+#1                                trans-hexaprenyltranstransferase activity
+#2                                             mannosyltransferase activity
+#3                                                   fatty-acyl-CoA binding
+#4  regulation of cyclin-dependent protein serine/threonine kinase activity
+#5                                           3'-5'-exoribonuclease activity
+#6                               inositol heptakisphosphate kinase activity
+#7                                       G protein-coupled receptor binding
+#8                                                ATPase activator activity
+#9                                          prenylcysteine oxidase activity
+#10                                         aminoacyl-tRNA editing activity
+
+
+#--- CLUSTER 2 ---
+#                                                nam
+#1                 phosphopyruvate hydratase complex
+#2                                      SAGA complex
+#3               transcription factor TFIIIB complex
+#4               transcription factor TFIIIC complex
+#5               protein phosphatase type 2A complex
+#6                           exosome (RNase complex)
+#7                     spliceosomal complex assembly
+#8           transcription factor TFIIH core complex
+#9  THO complex part of transcription export complex
+#10                               proteasome complex
+
+
+#--- CLUSTER 3 ---
+#                                                         nam
+#1                           ribosomal large subunit assembly
+#2                                     autophagosome assembly
+#3                       DNA replication checkpoint signaling
+#4                            DNA damage checkpoint signaling
+#5                                histone deacetylase complex
+#6  negative regulation of transcription by RNA polymerase II
+#7                          histone acetyltransferase complex
+#8               establishment of mitotic spindle orientation
+#9                                                    exocyst
+#10                                  ubiquitin ligase complex
+
+
+#--- CLUSTER 4 ---
+#                                                    nam
+#1                                          tRNA binding
+#2                                    nucleotide binding
+#3                                 magnesium ion binding
+#4                                       RNA cap binding
+#5           transcription cis-regulatory region binding
+#6  transcription regulatory region nucleic acid binding
+#7                          selenocysteine incorporation
+#8                            lipopolysaccharide binding
+#9                                  amyloid-beta binding
+#10                      phosphotyrosine residue binding
+
+
+#--- CLUSTER 5 ---
+#                                                     nam
+#1                  G1/S transition of mitotic cell cycle
+#2                                           MAPK cascade
+#3                                     mitotic cell cycle
+#4                                    mitotic cytokinesis
+#5                              regulation of cell growth
+#6                             osteoblast differentiation
+#7                       establishment of planar polarity
+#8         negative regulation of protein phosphorylation
+#9         positive regulation of protein phosphorylation
+#10 positive regulation of endothelial cell proliferation
+
+
+#--- CLUSTER 6 ---
+#                                                                   nam
+#1                                                 sulfate assimilation
+#2  nuclear-transcribed mRNA catabolic process, nonsense-mediated decay
+#3                                  regulation of immune system process
+#4                                       carbohydrate metabolic process
+#5                                           glycogen metabolic process
+#6                                        glycogen biosynthetic process
+#7                             regulation of glycogen catabolic process
+#8                                           xylulose metabolic process
+#9                               fructose 6-phosphate metabolic process
+#10                         fructose 2,6-bisphosphate metabolic process
+
+
+#--- CLUSTER 7 ---
+#                                                            nam
+#1                                                Golgi membrane
+#2  negative regulation of activation of membrane attack complex
+#3                                            acrosomal membrane
+#4                                       membrane attack complex
+#5                                             basement membrane
+#6                  integral component of nuclear inner membrane
+#7                                  mitochondrial outer membrane
+#8                                  mitochondrial inner membrane
+#9                                            lysosomal membrane
+#10                   integral component of peroxisomal membrane
+
+
+#--- CLUSTER 8 ---
+#                                                                         nam
+#1                                                 protein polyubiquitination
+#2                                                            protein folding
+#3                                                  protein dephosphorylation
+#4                                                      protein glycosylation
+#5                                             protein N-linked glycosylation
+#6                                             protein O-linked glycosylation
+#7                                          N-terminal protein myristoylation
+#8 protein quality control for misfolded or incompletely synthesized proteins
+#9                SRP-dependent cotranslational protein targeting to membrane
+#10SRP-dependent cotranslational protein targeting to membrane, translocation
+
+
+#--- CLUSTER 9 ---
+#                                              nam
+#1                   trace-amine receptor activity
+#2                    nociceptin receptor activity
+#3               steroid hormone receptor activity
+#4                       nuclear receptor activity
+#5       transmembrane signaling receptor activity
+#6                        GABA-A receptor activity
+#7                      cytokine receptor activity
+#8                     chemokine receptor activity
+#9  follicle-stimulating hormone receptor activity
+#10                     glucagon receptor activity
+
+
+#--- CLUSTER 10 ---
+#                                                                  nam
+#1                                            behavioral fear response
+#2                                                 response to hypoxia
+#3                                            adaptive immune response
+#4  production of molecular mediator involved in inflammatory response
+#5  negative regulation of inflammatory response to antigenic stimulus
+#6                                                    defense response
+#7                                                     immune response
+#8                                             humoral immune response
+#9                                          response to osmotic stress
+#10                           cellular response to DNA damage stimulus
+
+
+#--- CLUSTER 11 ---
+#                                                 nam
+#1                                      ion transport
+#2                                   cation transport
+#3                            potassium ion transport
+#4                               sodium ion transport
+#5                              calcium ion transport
+#6                            phosphate ion transport
+#7                                    anion transport
+#8                                 chloride transport
+#9  mitochondrial calcium ion transmembrane transport
+#10                            oligopeptide transport
+
+
+#--- CLUSTER 12 ---
+#                                                                nam
+#1                           cell surface receptor signaling pathway
+#2                epidermal growth factor receptor signaling pathway
+#3                         gamma-aminobutyric acid signaling pathway
+#4                                    neuropeptide signaling pathway
+#5                                           Notch signaling pathway
+#6                                      smoothened signaling pathway
+#7                               integrin-mediated signaling pathway
+#8                                insulin receptor signaling pathway
+#9               fibroblast growth factor receptor signaling pathway
+#10 extrinsic apoptotic signaling pathway via death domain receptors
+
+
+
+###Para reducir la redundancia funcional de los 2109 términos de Gene Ontology identificados en nuestro proyecto, se aplicó un flujo de análisis de minería de datos de texto en R. 
+#Se calculó la importancia de los términos mediante el método TF-IDF eliminando descriptores genéricos. 
+#Se realizó un agrupamiento jerarquico con el método clustering basado en la similitud de coseno de los nombres de las rutas, dividiendo el conjunto en 12 clusters funcionales. La identidad biológica de cada cluster se determinó mediante un análisis de sentimiento biológico y un análisis de redes de enriquecimiento. 
+#Por últmo, se identificaron las rutas líderes de cada módulo calculando el Log2 Fold Change entre las muestras infectadas 0.1 pfu y el control (wt).
+
+
+##CURVA DE DOSSIS RESPUESTA. 
+
+#demostrará si la activación biológica es proporcional a la carga viral (pfu) o si existe un efecto de saturación a partir de ciertas dosis
+
+# 1. Preparar los datos promediados por dosis y por cluster
+cluster_dose_response <- go_exp_calc %>%
+  group_by(cluster_ia) %>%
+  summarise(
+    WT = mean((wt.R1.bam + wt.R2.bam + wt.R3.bam) / 3),
+    D0.1 = mean((X0.1pfu.R1.bam + X0.1pfu.R2.bam + X0.1pfu.R3.bam) / 3),
+    D1 = mean((X1pfu.R1.bam + X1pfu.R2.bam + X1pfu.R3.bam) / 3),
+    D10 = mean((X10pfu.R1.bam + X10pfu.R2.bam + X10pfu.R3.bam) / 3),
+    D100 = mean((X100pfu.R1.bam + X100pfu.R2.bam + X100pfu.R3.bam) / 3)
+  ) %>%
+  # Pasamos a formato largo para ggplot
+  pivot_longer(cols = -cluster_ia, names_to = "Dose", values_to = "Expression") %>%
+  # Aseguramos el orden de las dosis en el eje X
+  mutate(Dose = factor(Dose, levels = c("WT", "D0.1", "D1", "D10", "D100")))
+
+# 2. Graficar la curva de Dosis-Respuesta
+ggplot(cluster_dose_response, aes(x = Dose, y = Expression, group = cluster_ia, color = cluster_ia)) +
+  geom_line(size = 1.2) +
+  geom_point(size = 3) +
+  facet_wrap(~cluster_ia, scales = "free_y") + # Cada cluster en su propio panel
+  theme_minimal() +
+  labs(
+    title = "Dinámica de Dosis-Respuesta por Cluster Funcional",
+    subtitle = "Promedio de expresión de rutas GO por dosis viral (pfu)",
+    x = "Dosis (PFU)",
+    y = "Nivel de Expresión Promedio"
+  ) +
+  theme(legend.position = "none", 
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+#Respuesta Lineal: La expresión sube de forma constante conforme aumenta la dosis (típico de rutas de daño celular).
+
+#Respuesta Umbral (Switch): El cluster se mantiene bajo en WT y 0.1, pero "explota" a partir de 1 o 10 pfu (típico de la respuesta inflamatoria aguda).
+
+#Respuesta de Saturación: Sube rápido en 0.1 y 1 pfu, pero en 10 y 100 se mantiene plano (indica que la célula ya alcanzó su máxima capacidad de respuesta).
+
+
+
+
+
+
+
+
+
+
+
+stop()
+# primero comprobamod si ya existe una VARIABLE llamada 'bm.annot.1'
+# y si existe la usamos, si no, cargamos la anotación
+#
+# ESTO NO VALE PARA NADA, pero viene muy bien si hemos hecho antes
+# un análisis de RNAseq con nuestros procedimientos habituales, porque
+# normalmente le llamamos bm.annot.1 a la anotación, y lo tenemos ya
+# cargado en R, pero si no, pues no vale para nada y hay que cargarla
+# de todas formas
+# NO VALE PARA NADA, pero nos sirve para recordar como comprobar si
+# existe una variable en R
+if (exists(quote(bm.annot.1)))
+    bio.ann <- bm.annot.1
+else
+    bm.1.file <- "/mnt/jr/SCIENTFICEXT/SCIENTIFIC/work/pamela/RNAseqAI/data/Cj_PFU/biomaRt.annotation.1st.txt" ###cambiado
+    bio.ann <- get_annotation(ensembl.db=NULL, biomart.db=bm.1.file)$biomart
+
+# si algo falla, parar
+if (is.null(bio.ann)) 
+    cat.err("Could not read BIOMART database", bm.1.file, '\n")
+
+nc.file <- "/mnt/jr/SCIENTFICEXT/SCIENTIFIC/work/pamela/RNAseqAI/data/Cj_PFU/normalized_counts.tab" ###cambiado
+
+# This will read the normalized data and return a LIST
+# containing several tables:
+norm_data <- load_coturnix_norm_count_data(file="normalized_data.tab")
+
+norm_counts <- norm_data$all_norm_counts  # all the gene counts
+trans_counts <- norm_data$transp_notm_counts # same as above but transposed
+
+# if argument select was used then the above function will have
+# filtered normalized counts of genes that were in argument 'select'
+# otherwise, it will not filter at all (i.e. will return again the
+# normalized counts and transposed normalized counts 'as is'.
+
+if (is.null(norm_counts)) 
+    cat.err("Could not read normalized counts", nc.file, "\n") ###NO CORRE BIEN
+
+# podría hacer falta
+#norm_counts$ensembl_gene_id <- rownames(norm_counts)
+
+
+
+##2. JOIN BOTH DATAFRAMES using variable "ensembl_gene_id"
+
+#Feature counts normalized -> normalized_counts.tab
+#Annotation -> biomart.goslim.tab 
+
+#Make sure where we are working "getwd()". 
+# Load file .Rdata
+#        load("cj_data.Rdata")
+#        ls() #visualization: "bio.ann" our data 
+
+# Load annotation file
+
+#        biomart.goslim.tab <- read.table("biomart.goslim.tab", 
+ #                           header = TRUE, sep = "\t")
+
+#join both tables 
+#"how = inner" only genes in both datas. 
+#        bio_annotada <- merge(norm_counts, biomart.goslim.tab, 
+#                        by = "ensembl_gene_id")
+                        
+ #       head(bio_annotada)
+
+# If you want to keep ALL bio.ann genes even if they don't have GO terms:
+# bio_annotada <- merge(bio.ann, biomart.goslim.tab, by = "ensembl_gene_id", all.x = TRUE)
+
+  #      nrow(bio.ann)       # Original genes
+  #     nrow(bio_annotada)  # Genes after union
+
+#See there are duplications 
+  #      any(duplicated(bio_annotada$ensembl_gene_id))
+
+##3. GROUP DUPLICATIONS by variable "goslim_goa_accession.x" 
+
+   #      bio_ordenada <- bio_annotada %>%
+   #                    arrange(goslim_goa_accession.x)
+  #          head(bio_ordenada)
+ #           rnow(bio_ordenada) #same as bio_annotada, we have only grouped
+
+# other way
+#   sig.a are the significant genes with PFAM annotation
+#   WE USE HERE LOG2FC
+   #     sig.sum <- aggregate(sig.a$log2FoldChange, by=list(Category=sig.a$pfam), FUN=sum)
+    #    sig.sum <- sig.sum[ order(sig.sum$x, decreasing=T), ]
+     #   sig.sum <- sig.sum[ ! is.na(sig.sum$Category), ]
+      #  sig.sum <- sig.sum[ sig.sum$Category != '', ]
+       # names(sig.sum) <- c("pfam", "sum.l2FC")
+ 
+                     
