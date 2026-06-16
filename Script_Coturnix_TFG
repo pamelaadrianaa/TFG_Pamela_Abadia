@@ -1,0 +1,761 @@
+#!/usr/bin/env Rscript
+
+#######################################
+###### INTELIGENCIA ARTIFICIAL ########
+#######################################
+
+###Coturnix japonica###
+
+#Librerias
+library(tidyverse)
+library(caret)
+library(glmnet)
+library(ggplot2)
+library(ggrepel)
+
+
+
+# 1. Cargar nuestros datos
+datos_go <- read.csv("go_sums_coturnix_japonica.csv", row.names = 1)
+
+dim(datos_go) #observación
+
+go_anotaciones <- datos_go[, c("nam", "def")]
+datos_conteos <- datos_go[, 3:17] # Solo las 15 columnas de las muestras (.bam)
+
+# 2. Definir matriz diseño 
+#Tres replicas por cada condicion
+nombres_muestras <- colnames(datos_go)[3:17]
+grupos_categoricos <- c(
+  rep("wt", 3), 
+  rep("0.1_pfu", 3), 
+  rep("1_pfu", 3), 
+  rep("10_pfu", 3), 
+  rep("100_pfu", 3)
+)
+#definir la dosis
+dosis_numericas <- c(
+  rep(0, 3), 
+  rep(0.1, 3), 
+  rep(1, 3), 
+  rep(10, 3), 
+  rep(100, 3)
+)
+diseno <- data.frame(
+  Muestra = nombres_muestras,
+  Condicion = factor(grupos_categoricos, levels = c("wt", "0.1_pfu", "1_pfu", "10_pfu", "100_pfu")),
+  Dosis = dosis_numericas
+)
+# Asignar los nombres de las muestras a los nombres de fila del diseño (para DESeq2)
+rownames(diseno) <- diseno$Muestra
+
+print(diseno)
+
+#                       Muestra Condicion Dosis
+#wt.R1.bam           wt.R1.bam        wt   0.0
+#wt.R2.bam           wt.R2.bam        wt   0.0
+#wt.R3.bam           wt.R3.bam        wt   0.0
+#X0.1pfu.R1.bam X0.1pfu.R1.bam   0.1_pfu   0.1
+#X0.1pfu.R2.bam X0.1pfu.R2.bam   0.1_pfu   0.1
+#X0.1pfu.R3.bam X0.1pfu.R3.bam   0.1_pfu   0.1
+#X1pfu.R1.bam     X1pfu.R1.bam     1_pfu   1.0
+#X1pfu.R2.bam     X1pfu.R2.bam     1_pfu   1.0
+#X1pfu.R3.bam     X1pfu.R3.bam     1_pfu   1.0
+#X10pfu.R1.bam   X10pfu.R1.bam    10_pfu  10.0
+#X10pfu.R2.bam   X10pfu.R2.bam    10_pfu  10.0
+#X10pfu.R3.bam   X10pfu.R3.bam    10_pfu  10.0
+#X100pfu.R1.bam X100pfu.R1.bam   100_pfu 100.0
+#X100pfu.R2.bam X100pfu.R2.bam   100_pfu 100.0
+#X100pfu.R3.bam X100pfu.R3.bam   100_pfu 100.0
+
+# Analisis de componentes principales (PCA)
+#Preparar la matriz numérica (aislamos las 15 columnas de conteos)
+datos_numericos <- datos_go[, 3:17]
+datos_pca <- as.data.frame(t(datos_numericos)) #transponemos
+
+varianza_columnas <- apply(datos_pca, 2, var)
+datos_pca_limpios <- datos_pca[, varianza_columnas > 0] #limpieza por seguridad 
+
+pca_resultado <- prcomp(datos_pca_limpios, center = TRUE, scale. = TRUE) #PCA
+
+# Extraer los porcentajes de varianza para los ejes
+varianza_explicada <- summary(pca_resultado)$importance[2, ]
+pc1_var <- round(varianza_explicada[1] * 100, 1)
+pc2_var <- round(varianza_explicada[2] * 100, 1)
+
+#Integración con la matriz de Diseño Experimental
+# Cruzamos las coordenadas (x, y) de cada punto con los grupos biológicos
+datos_grafico <- data.frame(
+  Muestra = rownames(pca_resultado$x),
+  PC1 = pca_resultado$x[, 1],
+  PC2 = pca_resultado$x[, 2],
+  Condicion = diseno$Condicion,
+  Dosis = diseno$Dosis
+)
+
+# ==============================================================================
+#   PCA 
+# ==============================================================================
+library(ggplot2)
+library(ggrepel)
+library(stringr)
+
+# Limpieza de las etiquetas para que sean legibles 
+etiquetas_limpias <- datos_grafico$Muestra
+etiquetas_limpias <- str_replace(etiquetas_limpias, "^X", "")       # Quita la 'X' inicial
+etiquetas_limpias <- str_replace(etiquetas_limpias, "\\.bam$", "")  # Quita el '.bam' final
+etiquetas_limpias <- str_replace_all(etiquetas_limpias, "\\.", "_") # Cambia puntos por guiones bajos
+etiquetas_limpias <- str_replace(etiquetas_limpias, "wt", "WT")     # Pone WT en mayúsculas
+
+# etiquetas de los datos
+datos_grafico$Etiqueta <- etiquetas_limpias
+
+grafico_pca_academico <- ggplot(datos_grafico, aes(x = PC1, y = PC2, color = Condicion)) +
+  
+  stat_ellipse(geom = "polygon", aes(fill = Condicion), alpha = 0.15, linetype = "dashed", size = 0.5) +
+  
+  geom_point(size = 4, alpha = 0.9) +
+  
+  geom_text_repel(aes(label = Etiqueta), size = 3.5, fontface = "bold", show.legend = FALSE) +
+  
+  scale_color_manual(values = c("wt" = "#4daf4a", 
+                                "0.1_pfu" = "#a6bddb", 
+                                "1_pfu" = "#74a9cf", 
+                                "10_pfu" = "#2b8cbe", 
+                                "100_pfu" = "#045a8d"),
+                     labels = c("Control (WT)", "0.1 PFU", "1 PFU", "10 PFU", "100 PFU")) +
+  
+  scale_fill_manual(values = c("wt" = "#4daf4a", 
+                               "0.1_pfu" = "#a6bddb", 
+                               "1_pfu" = "#74a9cf", 
+                               "10_pfu" = "#2b8cbe", 
+                               "100_pfu" = "#045a8d"),
+                    labels = c("Control (WT)", "0.1 PFU", "1 PFU", "10 PFU", "100 PFU")) +
+  
+  # ejes
+  labs(
+    x = paste0("Componente Principal 1 (", pc1_var, "%)"),
+    y = paste0("Componente Principal 2 (", pc2_var, "%)"),
+    color = "Carga Vírica",
+    fill = "Carga Vírica"
+  ) +
+  
+  theme_classic(base_family = "sans", base_size = 12) +
+  theme(
+    legend.position = "right",
+    legend.title = element_text(face = "bold"),
+    legend.background = element_rect(color = "black", size = 0.3), # Un pequeño recuadro para la leyenda
+    axis.text = element_text(color = "black", size = 11),
+    axis.title = element_text(face = "bold", size = 12),
+    panel.border = element_rect(colour = "black", fill = NA, size = 1) # Borde cerrado que da aspecto de paper
+  )
+
+print(grafico_pca_academico)
+
+
+# ==============================================================================
+#  HEATMAP 
+# ==============================================================================
+library(pheatmap)
+library(RColorBrewer)
+library(stringr)
+
+# 1. Extraer los datos numéricos y los nombres
+datos_numericos <- datos_go[, 3:17]
+nombres_go <- datos_go$nam
+
+# 2. FILTRO SEMÁNTICO: Lista negra de términos estructurales/genéricos (Componentes Celulares)
+terminos_basura <- c("cytosol", "nucleus", "cytoplasm", "nucleoplasm", "membrane", 
+                     "extracellular", "organelle", "intracellular", "Golgi apparatus", 
+                     "mitochondrion", "endoplasmic reticulum", "vesicle", "cytoskeleton",
+                     "cell part", "protein binding", "ATP binding")
+
+# Creamos un patrón de búsqueda 
+patron_filtro <- paste(terminos_basura, collapse = "|")
+
+# Nos quedamos SOLO con las rutas que NO contienen esas palabras genéricas
+indices_especificos <- !grepl(patron_filtro, nombres_go, ignore.case = TRUE)
+
+datos_filtrados <- datos_numericos[indices_especificos, ]
+nombres_filtrados <- nombres_go[indices_especificos]
+
+#Se han eliminado las rutas estructurales masivas
+
+# Calcular la varianza 
+varianzas_go <- apply(datos_filtrados, 1, var)
+
+# Seleccionar el Top 50 real
+indices_top50 <- order(varianzas_go, decreasing = TRUE)[1:50]
+matriz_top50 <- datos_filtrados[indices_top50, ]
+
+# Sustituir IDs por los nombres biológicos
+nombres_finales <- nombres_filtrados[indices_top50]
+nombres_finales[is.na(nombres_finales) | nombres_finales == ""] <- rownames(matriz_top50)[is.na(nombres_finales) | nombres_finales == ""]
+
+# Truncar nombres excesivamente largos (máximo 55 caracteres)
+nombres_cortos <- str_trunc(nombres_finales, width = 55, side = "right")
+rownames(matriz_top50) <- make.unique(as.character(nombres_cortos))
+
+# Limpieza de las etiquetas de las columnas
+nombres_columnas <- colnames(matriz_top50)
+nombres_columnas <- str_replace(nombres_columnas, "^X", "")       
+nombres_columnas <- str_replace(nombres_columnas, "\\.bam$", "")  
+nombres_columnas <- str_replace_all(nombres_columnas, "\\.", "_") 
+nombres_columnas <- str_replace(nombres_columnas, "wt", "WT")
+colnames(matriz_top50) <- nombres_columnas
+
+anotacion_col <- data.frame(
+  `Carga Vírica` = c(rep("Control (WT)", 3), rep("0.1 PFU", 3), rep("1 PFU", 3), rep("10 PFU", 3), rep("100 PFU", 3)),
+  check.names = FALSE 
+)
+rownames(anotacion_col) <- nombres_columnas
+
+colores_anotacion <- list(
+  `Carga Vírica` = c("Control (WT)" = "#4daf4a", "0.1 PFU" = "#a6bddb", 
+                     "1 PFU" = "#74a9cf", "10 PFU" = "#2b8cbe", "100 PFU" = "#045a8d")
+)
+
+paleta_divergente <- colorRampPalette(rev(brewer.pal(n = 7, name = "RdBu")))(100)
+
+pheatmap(
+  mat = as.matrix(matriz_top50),
+  scale = "row",                    
+  color = paleta_divergente,
+  annotation_col = anotacion_col,
+  annotation_colors = colores_anotacion,
+  cluster_rows = TRUE,              
+  cluster_cols = TRUE,              
+  show_rownames = TRUE,             
+  show_colnames = TRUE,             
+  fontsize_row = 8,                 # Letra un poco más grande y legible
+  fontsize_col = 10,
+  angle_col = 45,
+  
+  # Forzar las dimensiones exactas de cada celda en puntos
+  cellwidth = 25,                   # Cuadraditos más anchos
+  cellheight = 12,                  # Cuadraditos suficientemente altos para que respire la letra
+  border_color = "grey90",          # Un borde muy sutil gris claro para separar las celdas visualmente
+  
+  # Eliminamos width y height globales para que R calcule el tamaño ideal del lienzo
+  filename = "Heatmap_Top50_Proporciones_Perfectas.png"
+)
+
+
+
+
+# ==============================================================================
+#   CLUSTERING 
+# ==============================================================================
+
+library(tidyverse)
+library(ggplot2)
+ 
+# Preparación de los datos: partimos de 'datos_conteos' que ya tienes en tu script.
+# Transformamos a logaritmo para estabilizar la varianza matemática
+log_counts <- log2(datos_conteos + 1)
+ 
+# Calculamos la media de expresión de las 3 réplicas para cada dosis
+# Las columnas del 1 al 15 corresponden a: WT, 0.1, 1, 10, 100 PFU (3 réplicas cada una)
+ medias_por_dosis <- data.frame(
+    +     "Control_0PFU" = rowMeans(log_counts[, 1:3]),
+    +     "Dosis_0.1PFU" = rowMeans(log_counts[, 4:6]),
+    +     "Dosis_1PFU"   = rowMeans(log_counts[, 7:9]),
+    +     "Dosis_10PFU"  = rowMeans(log_counts[, 10:12]),
+    +     "Dosis_100PFU" = rowMeans(log_counts[, 13:15])
+    + )
+
+ # 3. Escalar los datos (Z-score por fila)
+ # CRÍTICO: Esto hace que rutas con muchos o pocos conteos se puedan comparar por su "tendencia"
+ datos_escalados <- t(scale(t(medias_por_dosis)))
+datos_escalados <- na.omit(datos_escalados) # Eliminamos filas con varianza 0 por seguridad
+
+# Clustering (K-Means)
+ set.seed(123) # Fijamos semilla para que siempre te salgan los mismos clusters
+num_clusters <- 6 # Vamos a agrupar todas las rutas de la Ontología Génica en 6 patrones
+ km_res <- kmeans(datos_escalados, centers = num_clusters, nstart = 25)
+
+ # Añadimos el clúster asignado a  tabla de datos
+ datos_plot <- as.data.frame(datos_escalados)
+ datos_plot$Cluster <- paste("Patrón", km_res$cluster)
+ datos_plot$GO_ID <- rownames(datos_plot)
+ 
+ # Transformar a formato largo para ggplot2 (Tidy Data)
+ datos_largos <- datos_plot %>%
+  +     pivot_longer(cols = starts_with("Dosis") | starts_with("Control"), 
+                     +                  names_to = "Dosis", 
+                     +                  values_to = "Z_score") %>%
+  +     # Forzamos el orden cronológico/cuantitativo en el eje X
+  +     mutate(Dosis = factor(Dosis, levels = c("Control_0PFU", "Dosis_0.1PFU", "Dosis_1PFU", "Dosis_10PFU", "Dosis_100PFU")))
+
+ #  Visualización de los Clústeres (Trend Plot)
+plot_tendencias <- ggplot(datos_largos, aes(x = Dosis, y = Z_score, group = GO_ID)) +
+  +     # Dibujamos las líneas individuales de cada ruta funcional muy tenues de fondo
+  +     geom_line(alpha = 0.05, color = "black") + 
+  +     # Superponemos la línea roja gruesa que marca la tendencia media de ese clúster
+  +     stat_summary(aes(group = 1), fun = mean, geom = "line", linewidth = 1.5, color = "#de2d26") + 
+  +     facet_wrap(~ Cluster, scales = "fixed") + # Separar en 6 paneles
+  +     theme_minimal(base_size = 14) +
+  +     labs(
+    +         title = "Dinámica Transcriptómica Dosis-Respuesta (Coturnix japonica)",
+    +         subtitle = "Agrupamiento funcional (K-Means) de rutas según su comportamiento frente a la carga vírica",
+    +         x = "Carga Vírica (IBDV)",
+    +         y = "Nivel de Expresión Estandarizado (Z-score)"
+    +     ) +
+  +     theme(
+    +         axis.text.x = element_text(angle = 45, hjust = 1, face = "bold"),
+    +         strip.text = element_text(face = "bold", size = 12, color = "white"),
+    +         strip.background = element_rect(fill = "#3182bd", color = NA),
+    +         panel.grid.minor = element_blank()
+    +     )
+
+
+ print(plot_tendencias)
+ 
+ ggsave("Clusters_Tendencia_Coturnix.png", plot = plot_tendencias, width = 12, height = 8, dpi = 300)
+
+
+
+
+# ==============================================================================
+# MODELO DE INTELIGENCIA ARTIFICIAL: RANDOM FOREST
+# ==============================================================================
+library(caret)
+library(randomForest)
+library(ggplot2)
+library(dplyr)
+library(stringr)
+
+#Preparación de los datos
+# Usaremos 'datos_filtrados' (Heatmap) para mantener fuera el ruido anatómico
+datos_rf <- as.data.frame(t(datos_filtrados))
+
+# Definimos la variable objetivo (Target) como FACTOR (Clasificación para extraer Gini)
+grupos <- factor(c(rep("WT", 3), rep("0.1_PFU", 3), rep("1_PFU", 3), rep("10_PFU", 3), rep("100_PFU", 3)),
+                 levels = c("WT", "0.1_PFU", "1_PFU", "10_PFU", "100_PFU"))
+datos_rf$Target <- grupos
+
+colnames(datos_rf) <- make.names(colnames(datos_rf))
+
+# Entrenamiento del Modelo (LOOCV)
+cat("Entrenando Random Forest con validación LOOCV (esto puede tardar unos segundos)...\n")
+set.seed(42) # Semilla matemática para que el resultado sea reproducible en tu TFG
+
+control_rf <- trainControl(method = "LOOCV")
+
+# Entrenamos el modelo asegurando que calcule la importancia (Gini)
+modelo_rf <- train(
+  Target ~ .,
+  data = datos_rf,
+  method = "rf",
+  trControl = control_rf,
+  importance = TRUE,     # CRÍTICO: Ordena al algoritmo calcular la Importancia de Gini
+  ntree = 500            # Construimos 500 árboles de decisión
+)
+
+# Imprimimos la precisión matemática (Accuracy) lograda durante la validación cruzada
+precision <- max(modelo_rf$results$Accuracy) * 100
+cat("✓ Modelo entrenado. Precisión predictiva global:", round(precision, 2), "%\n")
+
+# Extracción de la Importancia de Gini
+matriz_importancia <- as.data.frame(modelo_rf$finalModel$importance)
+matriz_importancia$ID_GO_Temp <- rownames(matriz_importancia)
+
+# Seleccionamos solo la métrica MeanDecreaseGini y cogemos el Top 20
+top_biomarcadores <- matriz_importancia %>%
+  select(ID_GO_Temp, MeanDecreaseGini) %>%
+  arrange(desc(MeanDecreaseGini)) %>%
+  head(20)
+
+top_biomarcadores$ID_GO <- gsub("\\.", ":", top_biomarcadores$ID_GO_Temp)
+
+#Damos nombre a los resultados
+diccionario <- datos_go[, c("nam", "def")]
+diccionario$ID_GO <- rownames(datos_go)
+
+resultados_rf <- merge(top_biomarcadores, diccionario, by = "ID_GO") %>%
+  arrange(desc(MeanDecreaseGini))
+
+# Acortamos los nombres muy largos 
+resultados_rf$Nombre_Corto <- str_trunc(resultados_rf$nam, width = 55, side = "right")
+
+resultados_rf$Nombre_Corto <- factor(resultados_rf$Nombre_Corto, levels = rev(resultados_rf$Nombre_Corto))
+
+# Gráfico de Biomarcadores 
+grafico_rf <- ggplot(resultados_rf, aes(x = MeanDecreaseGini, y = Nombre_Corto, fill = MeanDecreaseGini)) +
+  geom_bar(stat = "identity", color = "black", size = 0.3) +
+  scale_fill_gradient(low = "#a6bddb", high = "#045a8d") +
+  labs(
+    x = "Disminución Media de Gini (Peso del Biomarcador)",
+    y = "Proceso / Función Biológica",
+    fill = "Gini"
+  ) +
+  theme_classic(base_family = "sans", base_size = 12) +
+  theme(
+    axis.text.y = element_text(color = "black", size = 10, face = "bold"),
+    axis.text.x = element_text(color = "black", size = 11),
+    axis.title = element_text(face = "bold", size = 12),
+    legend.position = "none", # Ocultamos la leyenda porque el eje X ya da la información numérica
+    panel.border = element_rect(colour = "black", fill = NA, size = 1)
+  )
+
+print(grafico_rf)
+ggsave("RandomForest_Top20_Gini_AltaCalidad.png", plot = grafico_rf, width = 10, height = 7, dpi = 300)
+
+
+###  ANÁLISIS AISLADO DEL BIOMARCADOR PRINCIPAL (RANDOM FOREST)
+
+# Buscar el ID de la ruta "inositol phosphate dephosphorylation"
+nombre_ruta <- "inositol phosphate dephosphorylation"
+id_ruta <- diccionario$ID_GO[diccionario$nam == nombre_ruta & !is.na(diccionario$nam)][1]
+
+#  Extraer los datos de esa ruta específica (las 15 réplicas)
+conteos_ruta <- as.numeric(datos_numericos[id_ruta, ])
+
+# Crear el dataframe combinándolo con nuestra matriz de diseño
+datos_biomarcador <- data.frame(
+  Dosis = factor(c(rep("Control (WT)", 3), rep("0.1 PFU", 3), rep("1 PFU", 3), rep("10 PFU", 3), rep("100 PFU", 3)),
+                 levels = c("Control (WT)", "0.1 PFU", "1 PFU", "10 PFU", "100 PFU")),
+  Expresion = conteos_ruta
+)
+
+#Gráfico de Evolución
+grafico_evolucion <- ggplot(datos_biomarcador, aes(x = Dosis, y = Expresion)) +
+  # Añadimos un boxplot suave de fondo
+  geom_boxplot(outlier.shape = NA, alpha = 0.5, fill = "#a6bddb", color = "#045a8d") +
+  # Pintamos los puntos exactos de las 15 codornices
+  geom_jitter(width = 0.1, size = 3, color = "black", alpha = 0.7) +
+  # Añadimos una línea de tendencia (LOESS) para ver la trayectoria general de la infección
+  geom_smooth(aes(group = 1), method = "loess", color = "red", linetype = "dashed", se = FALSE) +
+  labs(
+    title = "Evolución de la Desfosforilación del Inositol Fosfato",
+    subtitle = paste("Biomarcador principal detectado por IA ( ID:", id_ruta, ")"),
+    x = "Carga Vírica (IBDV)",
+    y = "Nivel de Expresión (Conteos Normalizados)"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 13, hjust = 0.5),
+    plot.subtitle = element_text(size = 11, hjust = 0.5, color = "gray30"),
+    axis.text = element_text(color = "black", size = 11),
+    axis.title = element_text(face = "bold", size = 12),
+    panel.border = element_rect(colour = "black", fill = NA, size = 1)
+  )
+
+print(grafico_evolucion)
+ggsave("Evolucion_Inositol_Fosfato.png", plot = grafico_evolucion, width = 8, height = 5, dpi = 300)
+
+
+# ==============================================================================
+# MODELO DE INTELIGENCIA ARTIFICAIL: sPLS-DA CON mixOmics
+# ==============================================================================
+
+library(mixOmics)
+library(ggplot2)
+library(dplyr)
+library(stringr)
+
+# 1. Preparación Estricta de Matrices (X e Y)
+X <- as.matrix(t(datos_filtrados)) 
+
+# Y: Variable respuesta (Categorías de dosis de IBDV)
+Y <- factor(c(rep("Control (WT)", 3), rep("0.1 PFU", 3), rep("1 PFU", 3), rep("10 PFU", 3), rep("100 PFU", 3)),
+            levels = c("Control (WT)", "0.1 PFU", "1 PFU", "10 PFU", "100 PFU"))
+
+# 2. Entrenamiento del Modelo sPLS-DA
+cat("Entrenando sPLS-DA...\n")
+# ncomp = 2 (Queremos 2 componentes principales supervisados)
+# keepX = c(20, 20) (Le obligamos a seleccionar SÓLO las 20 rutas más cruciales por componente)
+modelo_splsda <- splsda(X, Y, ncomp = 2, keepX = c(20, 20))
+
+
+### VISUALIZACIÓN 1: SEGREGACIÓN DE MUESTRAS (Supervised PCA)
+
+# Extraemos las coordenadas matemáticas del modelo
+coordenadas_muestras <- as.data.frame(modelo_splsda$variates$X)
+coordenadas_muestras$Grupo <- Y
+
+# Calculamos el % de varianza explicada por cada componente para los ejes
+var_exp <- modelo_splsda$prop_expl_var$X
+eje_x_lbl <- paste0("Componente 1 (", round(var_exp[1] * 100, 1), "%)")
+eje_y_lbl <- paste0("Componente 2 (", round(var_exp[2] * 100, 1), "%)")
+
+grafico_splsda_muestras <- ggplot(coordenadas_muestras, aes(x = comp1, y = comp2, color = Grupo)) +
+  stat_ellipse(geom = "polygon", aes(fill = Grupo), alpha = 0.15, linetype = "dashed", size = 0.5) +
+  geom_point(size = 4, alpha = 0.9) +
+  scale_color_manual(values = c("Control (WT)" = "#4daf4a", "0.1 PFU" = "#a6bddb", 
+                                "1 PFU" = "#74a9cf", "10 PFU" = "#2b8cbe", "100 PFU" = "#045a8d")) +
+  scale_fill_manual(values = c("Control (WT)" = "#4daf4a", "0.1 PFU" = "#a6bddb", 
+                               "1 PFU" = "#74a9cf", "10 PFU" = "#2b8cbe", "100 PFU" = "#045a8d")) +
+  labs(x = eje_x_lbl, y = eje_y_lbl, color = "Carga Vírica", fill = "Carga Vírica") +
+  theme_classic(base_family = "sans", base_size = 12) +
+  theme(
+    legend.position = "right",
+    legend.title = element_text(face = "bold"),
+    legend.background = element_rect(color = "black", size = 0.3),
+    axis.text = element_text(color = "black", size = 11),
+    axis.title = element_text(face = "bold", size = 12),
+    panel.border = element_rect(colour = "black", fill = NA, size = 1)
+  )
+
+print(grafico_splsda_muestras)
+
+
+
+### VISUALIZACIÓN 2: LOS BIOMARCADORES (Loadings del Componente 1)
+
+# Extraemos el peso de las 20 rutas que definen el Componente 1 (la infección)
+pesos_biomarcadores <- selectVar(modelo_splsda, comp = 1)$value
+pesos_biomarcadores$ID_GO <- rownames(pesos_biomarcadores)
+
+resultados_splsda <- merge(pesos_biomarcadores, diccionario, by = "ID_GO")
+
+resultados_splsda$Nombre_Corto <- str_trunc(resultados_splsda$nam, width = 60, side = "right")
+resultados_splsda <- resultados_splsda %>% arrange(value.var)
+resultados_splsda$Nombre_Corto <- factor(resultados_splsda$Nombre_Corto, levels = resultados_splsda$Nombre_Corto)
+
+resultados_splsda$Direccion <- ifelse(resultados_splsda$value.var > 0, "Positivo", "Negativo")
+
+#grafico
+grafico_loadings <- ggplot(resultados_splsda, aes(x = value.var, y = Nombre_Corto, fill = Direccion)) +
+  geom_bar(stat = "identity", color = "black", size = 0.3) +
+  scale_fill_manual(values = c("Positivo" = "#045a8d", "Negativo" = "#a6bddb")) +
+  labs(
+    x = "Peso del Biomarcador (Loading de sPLS-DA Componente 1)",
+    y = "Proceso Funcional (GO)"
+  ) +
+  theme_classic(base_family = "sans", base_size = 12) +
+  theme(
+    axis.text.y = element_text(color = "black", size = 10, face = "bold"),
+    axis.text.x = element_text(color = "black", size = 11),
+    axis.title = element_text(face = "bold", size = 12),
+    legend.position = "none",
+    panel.border = element_rect(colour = "black", fill = NA, size = 1)
+  )
+
+print(grafico_loadings)
+
+
+# ==============================================================================
+# CONSENSO VISUAL Y TABLA COMPARATIVA (RF vs sPLS-DA)
+# ==============================================================================
+
+# Extraemos los IDs de los Top 20 de ambos modelos
+ ids_rf <- top_biomarcadores$ID_GO
+ ids_splsda <- biomarcadores_splsda$ID_GO
+ lista_ia <- list("Random Forest" = ids_rf, "sPLS-DA" = ids_splsda)
+
+#Tabla Comparativa Estructurada para el Anexo 
+
+rf_tabla <- diccionario_go %>% 
+  filter(ID_GO %in% ids_rf) %>% 
+  dplyr::select(ID_GO, Nombre) %>% 
+  mutate(Modelo = "Random Forest (No Lineal)")
+
+splsda_tabla <- diccionario_go %>% 
+  filter(ID_GO %in% ids_splsda) %>% 
+  dplyr::select(ID_GO, Nombre) %>% 
+  mutate(Modelo = "sPLS-DA (Lineal)")
+
+consenso_ia_tabla <- super_biomarcadores_nombres %>% 
+  mutate(Modelo = "Consenso Absoluto (Ambos)")
+
+# Unimos excluyendo la ruta central de las listas individuales para no duplicarla
+tabla_final_ia <- bind_rows(
+  consenso_ia_tabla,
+  rf_tabla %>% filter(!ID_GO %in% super_biomarcadores_nombres$ID_GO),
+  splsda_tabla %>% filter(!ID_GO %in% super_biomarcadores_nombres$ID_GO)
+)
+
+write_csv(tabla_final_ia, "Tabla_Comparativa_IA_Top20.csv")
+
+
+# ==============================================================================
+# MODELO ESTADISTICO CLASICO: DESeq2
+# ==============================================================================
+
+library(DESeq2)
+library(ggplot2)
+library(ggrepel)
+library(dplyr)
+library(stringr)
+
+# Preparación de la Matriz para DESeq2 (Exige números enteros)
+conteos_deseq <- round(datos_go[, 3:17])
+rownames(conteos_deseq) <- rownames(datos_go)
+
+# Reconstruimos la matriz de diseño original asegurando que WT sea el nivel de referencia (Control)
+diseno_deseq <- data.frame(
+  Condicion = factor(
+    c(rep("wt", 3), rep("0.1_pfu", 3), rep("1_pfu", 3), rep("10_pfu", 3), rep("100_pfu", 3)),
+    levels = c("wt", "0.1_pfu", "1_pfu", "10_pfu", "100_pfu")
+  )
+)
+# Es obligatorio que las filas del diseño se llamen igual que las columnas de los conteos
+rownames(diseno_deseq) <- colnames(conteos_deseq)
+
+# Creación del Objeto DESeq2 y ejecución del algoritmo
+cat("Ejecutando modelo estadístico DESeq2 (puede tardar unos segundos)...\n")
+dds <- DESeqDataSetFromMatrix(countData = conteos_deseq,
+                              colData = diseno_deseq,
+                              design = ~ Condicion)
+
+# Ejecutamos el pipeline completo de DESeq2 (estimación de tamaño, dispersión y test Wald)
+dds <- DESeq(dds)
+
+# Resultados: 100 PFU vs WT
+res_100_vs_wt <- results(dds, contrast = c("Condicion", "100_pfu", "wt"))
+res_df <- as.data.frame(res_100_vs_wt)
+
+# Añadimos los IDs 
+res_df$ID_GO <- rownames(res_df)
+res_df <- merge(res_df, diccionario_go[, c("ID_GO", "Nombre")], by = "ID_GO", all.x = TRUE)
+
+# Limpiamos los NA 
+res_df <- na.omit(res_df)
+
+
+### EXTRACCIÓN DE TABLAS DESEQ2
+
+library(dplyr)
+library(readr) 
+
+# Filtrar el dataframe para quedarnos solo con lo estadísticamente significativo
+rutas_significativas <- res_df %>% filter(Regulacion != "No Significativo")
+
+# Extraer el Top 20 de rutas SOBREEXPRESADAS 
+top_up <- rutas_significativas %>%
+  filter(Regulacion == "Sobreexpresado (Up)") %>%
+  arrange(desc(log2FoldChange)) %>%
+  head(20) %>%
+  dplyr::select(ID_GO, Nombre, log2FoldChange, padj) # CRÍTICO: Forzamos el select de dplyr
+
+#  Extraer el Top 20 de rutas INFRAEXPRESADAS 
+top_down <- rutas_significativas %>%
+  filter(Regulacion == "Infraexpresado (Down)") %>%
+  arrange(log2FoldChange) %>%
+  head(20) %>%
+  dplyr::select(ID_GO, Nombre, log2FoldChange, padj) # CRÍTICO: Forzamos el select de dplyr
+
+#  Mostrar 
+cat("\n============================================================\n")
+cat("TOP 10 RUTAS SOBREEXPRESADAS (RESPUESTA MASIVA AL IBDV)\n")
+cat("============================================================\n")
+print(head(top_up, 10))
+
+cat("\n============================================================\n")
+cat("TOP 10 RUTAS INFRAEXPRESADAS (APAGÓN CELULAR INDUCIDO)\n")
+cat("============================================================\n")
+print(head(top_down, 10))
+
+# Exportación de las Tablas Oficiales
+write_csv(top_up, "Tabla_Top20_Sobreexpresadas_100PFU.csv")
+write_csv(top_down, "Tabla_Top20_Infraexpresadas_100PFU.csv")
+
+# ==============================================================================
+# MODELO ESTADISTICO CLASICO: edgeR (WT vs 100 PFU)
+# ==============================================================================
+
+library(edgeR)
+library(dplyr)
+library(readr)
+
+# Preparación de Datos 
+grupos_edger <- factor(
+  c(rep("WT", 3), rep("0.1_PFU", 3), rep("1_PFU", 3), rep("10_PFU", 3), rep("100_PFU", 3)),
+  levels = c("WT", "0.1_PFU", "1_PFU", "10_PFU", "100_PFU")
+)
+
+# Creación del objeto DGEList 
+y <- DGEList(counts = conteos_deseq, group = grupos_edger)
+
+cat("Ejecutando pipeline de edgeR...\n")
+
+# Normalización TMM (Trimmed Mean of M-values)
+#elimina sesgos de composición en el RNA-seq
+y <- calcNormFactors(y)
+
+# Estimación de Dispersión (Ajuste del modelo binomial negativo)
+y <- estimateDisp(y)
+
+# Analisis WT vs 100 PFU
+# edgeR compara el segundo elemento respecto al primero
+test_exacto <- exactTest(y, pair = c("WT", "100_PFU"))
+
+# Resultados
+# tabla completa de resultados ordenados por p-valor
+resultados_edger <- topTags(test_exacto, n = Inf)$table
+
+# Añadimos la columna de IDs 
+resultados_edger$ID_GO <- rownames(resultados_edger)
+resultados_edger <- merge(resultados_edger, diccionario_go[, c("ID_GO", "Nombre")], by = "ID_GO", all.x = TRUE)
+
+# edgeR llama al p-valor ajustado "FDR" (False Discovery Rate), y al Fold Change "logFC"
+# Filtramos para quedarnos solo con lo significativo (FDR < 0.05 y logFC extremo)
+rutas_significativas_edger <- resultados_edger %>%
+  filter(FDR < 0.05) %>%
+  mutate(
+    Regulacion = case_when(
+      logFC > 1 ~ "Sobreexpresado (Up)",
+      logFC < -1 ~ "Infraexpresado (Down)",
+      TRUE ~ "No Significativo"
+    )
+  ) %>%
+  filter(Regulacion != "No Significativo")
+
+# Mostramos el Top 5 para comparar con DESeq2
+cat("\n============================================================\n")
+cat("TOP 5 RUTAS SOBREEXPRESADAS (edgeR)\n")
+cat("============================================================\n")
+print(
+  rutas_significativas_edger %>% 
+    filter(Regulacion == "Sobreexpresado (Up)") %>% 
+    arrange(desc(logFC)) %>% 
+    head(5) %>% 
+    dplyr::select(ID_GO, Nombre, logFC, FDR)
+)
+
+# Exportamos tabla 
+write_csv(rutas_significativas_edger, "Tabla_Completa_Significativos_edgeR_100PFU.csv")
+
+
+# ==============================================================================
+# CONSENSO MODELOS ESTADISTICOS CLASICOS (DESeq2 y edgeR): DIAGRAMAS DE VENN
+# ==============================================================================
+library(ggVennDiagram)
+library(patchwork)
+library(ggplot2)
+
+# Sobreexpresadas (UP) 
+venn_up <- ggVennDiagram(lista_up, set_color = "black", label_alpha = 0, set_name_size = 5) +
+  scale_fill_gradient(low = "#fee0d2", high = "#de2d26") +
+  ggtitle("Rutas Sobreexpresadas (Up)") +
+  scale_x_continuous(expand = expansion(mult = 0.25)) + 
+  theme_void(base_family = "sans") +
+  theme(
+    legend.position = "none",
+    # CRÍTICO: Forzamos a R a usar el margen estético de ggplot2
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14, margin = ggplot2::margin(b = 10))
+  )
+
+# Infraexpresadas (DOWN) 
+venn_down <- ggVennDiagram(lista_down, set_color = "black", label_alpha = 0, set_name_size = 5) +
+  scale_fill_gradient(low = "#deebf7", high = "#3182bd") +
+  ggtitle("Rutas Infraexpresadas (Down)") +
+  scale_x_continuous(expand = expansion(mult = 0.25)) + 
+  theme_void(base_family = "sans") +
+  theme(
+    legend.position = "none",
+    # CRÍTICO: Forzamos a R a usar el margen estético de ggplot2
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14, margin = ggplot2::margin(b = 10))
+  )
+
+# Fusión de ambos gráficos
+grafico_consenso <- venn_up + venn_down
+
+print(grafico_consenso)
+ggsave("Venn_Consenso_DESeq2_edgeR_Final.png", plot = grafico_consenso, width = 12, height = 6, dpi = 300)
+
+
+
+
+stop()
