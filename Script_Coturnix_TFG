@@ -154,7 +154,7 @@ print(grafico_pca_academico)
 
 
 # ==============================================================================
-#  HEATMAP 
+#  HEATMAP (NO APLICADO AL TFG)
 # ==============================================================================
 library(pheatmap)
 library(RColorBrewer)
@@ -244,7 +244,7 @@ pheatmap(
 
 
 # ==============================================================================
-#   CLUSTERING 
+#   CLUSTERING (NO APLICADO AL TFG)
 # ==============================================================================
 
 library(tidyverse)
@@ -446,7 +446,7 @@ ggsave("Evolucion_Inositol_Fosfato.png", plot = grafico_evolucion, width = 8, he
 
 
 # ==============================================================================
-# MODELO DE INTELIGENCIA ARTIFICAIL: sPLS-DA CON mixOmics
+# MODELO DE INTELIGENCIA ARTIFICAIL: sPLS-DA CON mixOmics (NO APLICADO AL TFG)
 # ==============================================================================
 
 library(mixOmics)
@@ -536,7 +536,7 @@ print(grafico_loadings)
 
 
 # ==============================================================================
-# CONSENSO VISUAL Y TABLA COMPARATIVA (RF vs sPLS-DA)
+# CONSENSO VISUAL Y TABLA COMPARATIVA (RF vs sPLS-DA) (NO APLICADO AL TFG)
 # ==============================================================================
 
 # Extraemos los IDs de los Top 20 de ambos modelos
@@ -652,7 +652,7 @@ write_csv(top_up, "Tabla_Top20_Sobreexpresadas_100PFU.csv")
 write_csv(top_down, "Tabla_Top20_Infraexpresadas_100PFU.csv")
 
 # ==============================================================================
-# MODELO ESTADISTICO CLASICO: edgeR (WT vs 100 PFU)
+# MODELO ESTADISTICO CLASICO: edgeR (WT vs 100 PFU) (NO APLICADO AL TFG)
 # ==============================================================================
 
 library(edgeR)
@@ -719,7 +719,7 @@ write_csv(rutas_significativas_edger, "Tabla_Completa_Significativos_edgeR_100PF
 
 
 # ==============================================================================
-# CONSENSO MODELOS ESTADISTICOS CLASICOS (DESeq2 y edgeR): DIAGRAMAS DE VENN
+# CONSENSO MODELOS ESTADISTICOS CLASICOS (DESeq2 y edgeR): DIAGRAMAS DE VENN (NO APLICADO AL TFG)
 # ==============================================================================
 library(ggVennDiagram)
 library(patchwork)
@@ -755,7 +755,7 @@ grafico_consenso <- venn_up + venn_down
 print(grafico_consenso)
 ggsave("Venn_Consenso_DESeq2_edgeR_Final.png", plot = grafico_consenso, width = 12, height = 6, dpi = 300)
 
-
+end
 
 
 stop()
