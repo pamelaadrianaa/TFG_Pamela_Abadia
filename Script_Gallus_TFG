@@ -98,7 +98,7 @@ ggsave("PCA_Invitro_Gallus.png", plot = grafico_pca_invitro, width = 10, height 
 
 
 # ==============================================================================
-# HEATMAP 
+# HEATMAP (NO APLICADO AL TFG)
 # ==============================================================================
 library(pheatmap)
 library(RColorBrewer)
@@ -364,7 +364,7 @@ if(error_oob < 0.40) {
 
 
 # ==============================================================================
-# MODELO IA: sPLS-DA 
+# MODELO IA: sPLS-DA (NO APLICADO AL TFG)
 # ==============================================================================
 set.seed(42)
 modelo_splsda <- splsda(X_ml, Y_ml, ncomp = 2, keepX = c(20, 20))
@@ -400,7 +400,7 @@ print(grafico_splsda_estetico)
 ggsave("ML_sPLSDA_Invitro_Estetico.png", plot = grafico_splsda_estetico, width = 10, height = 7, dpi = 300)
 
 ##########################################################
-#### sPLS-DA: DF.1_uninfected vs DF.1P_uninfected#########
+#### sPLS-DA: DF.1_uninfected vs DF.1P_uninfected   (NO APLICADO AL TFG)######### 
 ##########################################################
 
 library(mixOmics)
@@ -668,7 +668,7 @@ write_csv(firma_desafio, "Firma_Desafio_DF1_vs_DF1P_IBDV.csv")
 
 
 # ==============================================================================
-# MODELO ESTADISTICO CLASICO: EdgeR
+# MODELO ESTADISTICO CLASICO: EdgeR (NO APLICADO AL TFG)
 # ==============================================================================
 ##########################################
 ####DF.1_uninfected vs DF.1P_uninfected###
